@@ -179,3 +179,38 @@ adversarial suite, and the naive-versus-hardened comparison — that is, the who
 **sole home** of *MCP server design*, *OAuth 2.1 / authn / authz*, *rate limiting* and *API security*.
 MCP and resource-server authorization are delivered. **Rate limiting is now delivered nowhere in the
 portfolio** and that row must be corrected or re-homed.
+
+---
+
+## ADR-003 — The adversarial review: five breaches planted, five caught
+
+**Status:** accepted, 2026-09-13, **after** the suite was green.
+
+Project 3 shipped a guard that forbade importing a module which did not exist. It passed every run
+and protected nothing until a reviewer planted the breach it was supposed to stop. A suite that has
+never failed is not evidence that the system is safe; it is evidence that nothing has tested it.
+
+So each control was deliberately removed, one at a time, and the suite was re-run. A control whose
+removal changes nothing is not a control.
+
+| # | Breach planted | Caught by | Result |
+|---|---|---|---|
+| 1 | `HARDENED` stops checking audience | `test_A_valid_token_for_another_resource_server_is_refused` | **FAILED** as required |
+| 2 | `effective_scopes` returns the leaf's claim instead of the intersection | both `test_B_*` attenuation tests | **FAILED** as required |
+| 3 | `consume_approval` drops `consumed_at IS NULL` from its `WHERE` | `test_D_two_concurrent_calls…` | **FAILED** — as an `IntegrityError` |
+| 4 | the approval lookup stops filtering on the account | `test_C_an_approval_that_does_not_match…[other_account]` | **FAILED** as required |
+| 5 | an `admin_reset` tool is registered on the MCP surface | `test_the_advertised_tool_list_is_exactly_the_six` and `test_no_reset_shaped_tool_is_reachable_over_mcp` | **FAILED** as required |
+
+Every control was restored and the full suite is green: **32 tests**.
+
+**Breach 3 is the most informative of the five.** Removing the conditional from the `UPDATE` did not
+produce a wrong answer — it produced a `psycopg`/asyncpg `IntegrityError` from the UNIQUE constraint
+on `irreversible_effect.approval_id`. That is the backstop doing its job: even with the application
+logic removed, the database refused to record a second effect against one approval. The two
+mechanisms are genuinely independent, which is the only reason it is honest to call the second one a
+backstop rather than a comment.
+
+**What this review does not establish.** It shows that each control is load-bearing and that the
+tests detect its removal. It does not enumerate every attack — no such review does. The threat model
+in `docs/threat-model.md` states what is out of scope, and the largest item is unchanged: a stolen,
+still-valid token used within its attenuated scope for reversible reads is not detected here.
