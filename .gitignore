@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+node_modules/
+.next/
+*.tsbuildinfo
+.env
+.vercel
+# Ephemeral signing material for the test authority. Never committed, regenerated per run.
+*.pem
+keys/
