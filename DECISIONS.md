@@ -207,7 +207,7 @@ removal changes nothing is not a control.
 | 4 | the approval lookup stops filtering on the account | `test_C_an_approval_that_does_not_match…[other_account]` | **FAILED** as required |
 | 5 | an `admin_reset` tool is registered on the MCP surface | `test_the_advertised_tool_list_is_exactly_the_six` and `test_no_reset_shaped_tool_is_reachable_over_mcp` | **FAILED** as required |
 
-Every control was restored and the full suite is green: **32 tests**.
+Every control was restored and the full suite was green: **32 tests** at that date. ADR-004 adds three more breaches and the suite is now 51.
 
 **The removals are a script, not a memory of an afternoon.** A reviewer pointed out that this table
 was exactly as checkable as the Project 3 guard it opens by warning about — a claim in a document.
@@ -235,3 +235,89 @@ tests detect its removal. It does not enumerate every attack — no such review 
 breaches chosen by the author are five the author thought of. The threat model
 in `docs/threat-model.md` states what is out of scope, and the largest item is unchanged: a stolen,
 still-valid token used within its attenuated scope for reversible reads is not detected here.
+
+---
+
+## ADR-004 — The second review: the claim was false on the deployed path
+
+**Status:** accepted, 2026-09-13, **after** ADR-003 and after the console was published.
+
+ADR-003 planted five breaches and caught five, and concluded that each control was load-bearing.
+That conclusion was correct and it was not the same as the system being sound. A second read-only
+review — told to attack a copy rather than read it — found **two material holes**, and neither was
+in a control ADR-003 had tested. They were in the space *between* the controls.
+
+### 1. The agent could manufacture the approval
+
+`POST /api/v1/approvals` was unauthenticated in every environment, including `production`.
+
+The reasoning for leaving it open is written down in the original docstring, which is why it is
+worth reading: *the MCP surface cannot reach it; an agent may `request_approval` and cannot create
+one.* That is true and it is not the boundary. **The agent is a process, not a tool list.** It makes
+ordinary HTTP requests, and the tools and the console API are served from one origin. The reviewer
+minted a token, `POST`ed an approval naming its own subject, called `issue_credit` over a real MCP
+client, and read `1` out of `SELECT count(*) FROM irreversible_effect`.
+
+`docs/threat-model.md` §3 already granted the adversary *"write access to the resource server's
+database … through the server's own API"*. §6 called the confused deputy mitigated anyway. The
+threat model contained both halves of the contradiction and nobody had put them together.
+
+**Closed by** `AAB_APPROVER_TOKEN`: unset disables the route, and a bearer token the test authority
+mints — valid signature, correct audience, sufficient scope — is refused with 401. It is a
+credential boundary and not an approver identity, and the README now says which of the two it is.
+
+### 2. The audit trail was blind to exactly the attacks this project is about
+
+A token refused by `BrokerTokenVerifier` never reaches `effects.call_tool`: the SDK rejects the
+request at the transport. `call_tool` was the only thing that wrote audit rows. So on the deployed
+server a wrong audience produced **no audit row**. Nor did a forged signature, an expired token, or
+a garbage string. The README said *"every decision, refusals included"*, and the `AuditEvent`
+docstring said *"every outcome, including every refusal"*.
+
+**The suite could not have caught this, and that is the part worth keeping.** The kill tests and the
+matrix run both call `call_tool` directly — deliberately, so they can count effects from a clean
+database. In the harness scenario A *is* audited, and `artifacts/audit.json` carries an
+`audience_mismatch` row that the deployed server would never have written. Every test passed. The
+artifact was honest about the run that produced it and wrong about production.
+
+This is the same shape as the Project 3 defect ADR-003 opens by citing, arrived at from the other
+direction: there, a guard that could not fail; here, a claim no test was positioned to check.
+
+**Closed by** the verifier writing the row itself, with no subject and no token id when the token
+did not authenticate — recording the identity it *claimed* would make the trail repeat an attacker's
+assertion as though the server had checked it.
+
+### Two minor findings, both in the parse that runs before the signature check
+
+A deeply nested `act` raised `RecursionError` inside the **unverified** decode — no signing key
+needed — and `RecursionError` is not a `PyJWTError`, so it left `verify_token` as an uncaught 500
+with no audit row. A 16 KB cap on the bearer string closes it; the `except` clause behind the cap
+cannot fire, so it is tested with the cap lifted rather than shipped as a guard that cannot fail.
+Separately, `aud` was read as `tuple(anything iterable)`, which accepted a JSON *object* by taking
+its keys and raised an uncaught `TypeError` on a number. Neither widened authority. `aud` is now a
+string or a list of strings and nothing else.
+
+### What the review confirmed
+
+Token forgery across an audience near-miss matrix (trailing slash, uppercased host, prefix,
+`/x/../mcp`, fragment), `alg:none`, HS256 keyed on the Ed25519 public bytes, unknown `kid`,
+wrong-key signatures, malformed `act` shapes, non-string `scope`; attenuation including the
+multi-hop middle link; the approval race at 16/16 and 8-way concurrency on an isolated database;
+`IrreversibleEffect` constructed in exactly one place; the `UNIQUE(approval_id)` backstop; the admin
+reset absent from the tool list and gated by constant-time comparison. The reviewer also planted
+four breaches of their own — accept `alg:none`, add HS256, drop expiry, drop `amount` from the
+approval lookup — and each turned the suite red.
+
+### The three new breaches
+
+`scripts/plant_breaches.py` carries breaches **6, 7 and 8**: delete the approver gate, stop writing
+transport refusals to the audit trail, stop catching `RecursionError`. Each requires its tests to
+fail. The fixes are held to the standard ADR-003 set for the controls that were right the first
+time — **eight planted, eight caught**, and the suite is green at **51 tests**.
+
+### What this does not establish
+
+Two reviews are two reviews. The first found a hole the author had not thought of, and so did the
+second, which is evidence about the method rather than about the remaining count. The largest
+unmitigated item is unchanged: a stolen, still-valid token used within its attenuated scope for
+reversible reads is not detected here.

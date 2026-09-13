@@ -32,6 +32,7 @@ threat model.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 from typing import Annotated, Literal
 
@@ -48,7 +49,8 @@ from agent_authz_broker import __version__
 from agent_authz_broker.approvals import get_approval
 from agent_authz_broker.authz import HARDENED, Decision, effective_scopes
 from agent_authz_broker.config import Settings
-from agent_authz_broker.effects import ToolOutcome, call_tool
+from agent_authz_broker.domain import DenialReason
+from agent_authz_broker.effects import ToolOutcome, call_tool, record_transport_refusal
 from agent_authz_broker.tokens import verify_token
 
 __all__ = ["TOOL_NAMES", "BrokerTokenVerifier", "create_server"]
@@ -183,20 +185,39 @@ class BrokerTokenVerifier:
     never be the only one. The authoritative audience check is in ``authz.py``, on claims the
     decision function reads for itself.
 
-    Verification failures return ``None`` rather than a reason. The SDK's contract has no place for
-    one, and the reason is preserved where it matters: ``effects.call_tool`` re-verifies the raw
-    token and records the specific denial in the audit trail.
+    Verification failures return ``None`` rather than a reason — the SDK's contract has no place for
+    one — **and are written to the audit trail here**, because this is the only place that sees
+    them. A refusal at this layer never reaches ``effects.call_tool``: the SDK rejects the request
+    first, so the audit row `call_tool` would have written is never written.
+
+    That was a real hole, and it was invisible from inside the test suite. The adversarial suite and
+    the matrix run both call ``call_tool`` directly, so in the harness the flagship attack — a valid
+    token minted for another resource server — *was* audited, and `artifacts/audit.json` carries an
+    ``audience_mismatch`` row. Over the real transport it produced **nothing**: no row for a wrong
+    audience, a bad signature, an expired token or a forged one. Every probe this project exists to
+    detect was the one kind of event the trail could not show, while the README said *"every
+    decision, refusals included"*. A reviewer drove the real client and counted the rows.
     """
 
-    def __init__(self, *, authority_jwks: dict[str, PyJWKSet], audience: str) -> None:
-        """Bind the verifier to a key set and to this server's own identity.
+    def __init__(
+        self,
+        *,
+        authority_jwks: dict[str, PyJWKSet],
+        audience: str,
+        engine: AsyncEngine | None = None,
+    ) -> None:
+        """Bind the verifier to a key set, to this server's own identity, and to the audit trail.
 
         Args:
             authority_jwks: Trusted issuer -> its key set. An issuer absent here is refused.
             audience: This server's identifier, for reporting ``resource`` truthfully.
+            engine: Where refusals at this layer are recorded. Optional only so that a test can
+                construct a verifier without a database; ``create_server`` always supplies one, and
+                a verifier without it refuses exactly as before but silently.
         """
         self._jwks = authority_jwks
         self._audience = audience
+        self._engine = engine
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token, or return ``None`` if it is not authentic.
@@ -219,9 +240,18 @@ class BrokerTokenVerifier:
         """
         claims = verify_token(token, jwks_by_issuer=self._jwks)
         if isinstance(claims, str):
+            # No subject and no token id: the token did not authenticate, so every identifier in it
+            # is an attacker's assertion. Recording them as though they were established is how an
+            # audit trail starts lying under exactly the conditions it exists for.
+            await self._audit(reason=claims, subject=None, token_id=None)
             return None
 
         if self._audience not in claims.audience:
+            await self._audit(
+                reason="audience_mismatch",
+                subject=claims.subject,
+                token_id=claims.token_id,
+            )
             return None
 
         granted = effective_scopes(claims, attenuate=True)
@@ -242,6 +272,26 @@ class BrokerTokenVerifier:
                 "act": [link.subject for link in claims.chain],
             },
         )
+
+    async def _audit(
+        self, *, reason: DenialReason, subject: str | None, token_id: str | None
+    ) -> None:
+        """Record a refusal made at the transport, without letting it break the refusal.
+
+        The tool is unknown at this layer — the SDK has not routed the request yet — so the row
+        names the layer instead of guessing. ``effective_scopes`` is empty because no authority was
+        established, which is the honest value rather than a convenient one.
+
+        A failure to write the row is swallowed on purpose. A database that is down must not turn a
+        *refusal* into a 500 that a caller could read as something other than "no": failing closed
+        is the behaviour, and the audit row is the record of it, not the mechanism.
+        """
+        if self._engine is None:
+            return
+        with contextlib.suppress(Exception):
+            await record_transport_refusal(
+                self._engine, reason=reason, subject=subject, token_id=token_id
+            )
 
 
 def _caller() -> AccessToken:
@@ -299,7 +349,7 @@ def create_server(
         raise ValueError("create_server needs at least one trusted issuer's key set")
 
     audience = settings.resource_server_url
-    verifier = BrokerTokenVerifier(authority_jwks=authority_jwks, audience=audience)
+    verifier = BrokerTokenVerifier(authority_jwks=authority_jwks, audience=audience, engine=engine)
 
     auth = AuthSettings(
         # The authority that signs the tokens this server accepts. It is not run here: ADR-002

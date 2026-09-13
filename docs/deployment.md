@@ -115,16 +115,21 @@ is why the local image and the deployed image are the same image.
 | `AAB_RESOURCE_SERVER_URL` | no | **This server's own identity**, and the whole audience check. |
 | `AAB_CORS_ALLOW_ORIGINS` | no | JSON array of browser origins allowed to call the console API. |
 | `AAB_ADMIN_RESET_TOKEN` | **yes** | Gates the operator reset route. Unset: unavailable. |
+| `AAB_APPROVER_TOKEN` | **yes** | Gates approval-granting. **Not an MCP credential** — no token the agent holds satisfies it. Unset: unavailable. |
 | `PORT` | no | Supplied by Render. The entrypoint binds it; 8000 locally. |
+
+An empty value for either token is read as unset rather than arming the gate with the empty string:
+a cleared dashboard field or a Makefile forwarding an unset variable would otherwise produce a route
+that 401s at everything and looks configured.
 
 The values `AAB_ENVIRONMENT` accepts are defined in `src/agent_authz_broker/config.py`.
 
-The two secrets are `sync: false` in `render.yaml`: Render prompts for them on first apply and
-stores them encrypted. Neither value enters the repository, the blueprint, or a build log.
+The three secrets are `sync: false` in `render.yaml`: Render prompts for them on first apply and
+stores them encrypted. No value enters the repository, the blueprint, or a build log.
 
 The CI secret scan is a **backstop, and a narrow one**. Be precise about what it covers, because a
 gate that is believed to cover more than it does is worse than no gate: it catches a private-key
-block, an `AAB_ADMIN_RESET_TOKEN` assigned a value, and a JWT literal. **It does not recognise a
+block, an `AAB_ADMIN_RESET_TOKEN` or `AAB_APPROVER_TOKEN` assigned a value, and a JWT literal. **It does not recognise a
 connection string**, so a committed `AAB_POSTGRES_DSN` pointing at a real provider would pass it.
 The patterns are kept narrow deliberately — a broader DSN rule matches the local
 `postgresql://aab:aab_local_dev@localhost:15434/aab` that appears legitimately in `.env.example`,
@@ -256,9 +261,9 @@ assemble the list themselves.
   seeds when `AAB_ENVIRONMENT` is unset, does not seed when it is `production`, honours `PORT`,
   and — the one that matters — **stops with a non-zero exit before starting uvicorn when
   `alembic upgrade head` fails.**
-- `render.yaml` and the CI workflow parse. The secret scan's three patterns catch a private-key
-  block, a committed reset token and a JWT literal, and match nothing in this repository including
-  the workflow that defines them.
+- `render.yaml` and the CI workflow parse. The secret scan's four patterns catch a private-key
+  block, a committed reset or approver token and a JWT literal, and match nothing in this
+  repository including the workflow that defines them.
 - `make db-up` brings `docker-compose.yml` up to a healthy PostgreSQL; every other target expands
   to the command it documents.
 

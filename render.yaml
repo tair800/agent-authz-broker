@@ -78,3 +78,13 @@ services:
       # lets anyone who reads the repository wipe the demonstration.
       - key: AAB_ADMIN_RESET_TOKEN
         sync: false
+
+      # The credential a human presents to grant an approval. **Not an MCP credential**, and the
+      # test authority does not mint it: an agent holding a valid, correctly attenuated token must
+      # not be able to approve its own irreversible action. Unset disables the route.
+      #
+      # This route was open in every environment until a security review used it to produce a real
+      # irreversible effect end to end — DECISIONS.md ADR-004. `sync: false` forever, for the same
+      # reason as the reset above and a sharper one: a value here is the authority to approve.
+      - key: AAB_APPROVER_TOKEN
+        sync: false

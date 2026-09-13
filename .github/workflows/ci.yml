@@ -142,6 +142,7 @@ jobs:
           cat > "$RUNNER_TEMP/patterns.txt" <<'PATTERNS'
           -----BEGIN [A-Z ]*PRIVATE KEY-----
           AAB_ADMIN_RESET_TOKEN["']?[[:space:]]*[:=][[:space:]]*["']?[A-Za-z0-9_+/=-]{12,}
+          AAB_APPROVER_TOKEN["']?[[:space:]]*[:=][[:space:]]*["']?[A-Za-z0-9_+/=-]{12,}
           eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}
           PATTERNS
 

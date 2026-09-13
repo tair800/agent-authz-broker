@@ -108,6 +108,19 @@ class TestAuthority:
             self._base(subject=subject, audience=audience, scopes=scopes, lifetime=lifetime)
         )
 
+    def mint_malformed(self, *, claims: dict[str, Any]) -> str:
+        """A properly signed token whose claims are whatever the caller says, including nonsense.
+
+        A lab instrument for the half of the threat model that is not about cryptography. Every
+        other mint here produces a well-formed payload, so nothing could express *"a real signature
+        over an `aud` that is a JSON object"* — which a reviewer found the verifier accepted, by
+        taking the object's keys. Reaching the claim parser at all requires a valid signature, so
+        the case cannot be written without the signing key.
+        """
+        base = self._base(subject="agent-7", audience="https://unused.invalid", scopes=[])
+        base.update(claims)
+        return self._sign(base)
+
     def mint_delegated(
         self,
         *,

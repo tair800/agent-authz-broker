@@ -62,8 +62,12 @@ breaches: migrate ## Replant ADR-003's five breaches and require the suite to ca
 matrix: migrate ## Measure the security matrix and write every console artifact
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) 	  uv run python -m agent_authz_broker.demo
 
+# Forwarded, never defaulted. A value here would be a committed credential for granting
+# approvals, and an empty one is read as unset (see config.py), so POST /api/v1/approvals
+# is simply unavailable unless you export this yourself before running the target.
 api: seed ## Serve the MCP server and the console API against the seeded database
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) \
+	  AAB_APPROVER_TOKEN="$(AAB_APPROVER_TOKEN)" \
 	  uv run uvicorn "agent_authz_broker.app:create_app" --factory --port 8000
 
 clean: ## Remove caches. The database is left alone: `docker compose down` stops it.

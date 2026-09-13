@@ -30,7 +30,7 @@ from agent_authz_broker.db.models import AuditEvent, IrreversibleEffect, new_id
 from agent_authz_broker.domain import IRREVERSIBLE_TOOLS, Decision, DenialReason
 from agent_authz_broker.tokens import verify_token
 
-__all__ = ["ToolOutcome", "call_tool"]
+__all__ = ["ToolOutcome", "call_tool", "record_transport_refusal"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +85,39 @@ async def _record(
     session.add(event)
     await session.flush()
     return event.audit_id
+
+
+async def record_transport_refusal(
+    engine: AsyncEngine,
+    *,
+    reason: DenialReason,
+    subject: str | None,
+    token_id: str | None,
+) -> str:
+    """Record a refusal that happened before any tool was routed.
+
+    The transport rejects an inauthentic or wrong-audience token before :func:`call_tool` runs, so
+    this is the only place those refusals can be written down. Without it the audit trail was
+    complete for everything **except** the attacks this repository is about: a wrong audience, a
+    forged signature, an expired token. See :class:`~agent_authz_broker.mcp_server.
+    BrokerTokenVerifier`.
+
+    ``tool`` is recorded as ``"-"`` rather than guessed: at this layer the request has not been
+    routed and the tool genuinely is not known yet. Writing a plausible one would put a fact in the
+    trail that nothing established.
+    """
+    async with AsyncSession(engine) as session, session.begin():
+        return await _record(
+            session,
+            tool="-",
+            policy=HARDENED.name,
+            decision=Decision.DENIED,
+            reason=reason,
+            subject=subject,
+            token_id=token_id,
+            effective=frozenset(),
+            required=None,
+        )
 
 
 async def call_tool(

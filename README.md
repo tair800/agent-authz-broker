@@ -93,7 +93,7 @@ concurrency test and fail behind two workers, so there is no lock in this reposi
 
 ---
 
-## The adversarial review: five breaches planted, five caught
+## The adversarial review: eight breaches planted, eight caught
 
 A suite that has never failed is not evidence the system is safe. Each control was removed in turn
 and the suite re-run.
@@ -105,15 +105,24 @@ and the suite re-run.
 | `consume_approval` drops `consumed_at IS NULL` | scenario D **failed** — as an `IntegrityError` |
 | approval lookup stops filtering on the account | scenario C `[other_account]` **failed** |
 | an `admin_reset` tool is registered on MCP | two surface tests **failed** |
+| the approver credential no longer gates `POST /api/v1/approvals` | two boundary tests **failed** |
+| a refusal at the transport is not written to the audit trail | two boundary tests **failed** |
+| `verify_token` stops catching `RecursionError` | the parse test **failed**, as a raw crash |
 
 Breach 3 is the informative one: removing the application-level guard did not produce a wrong
 answer, it produced a constraint violation. The database refused the second effect on its own, which
 is the only reason it is honest to call that constraint a backstop rather than decoration.
 
-**Re-run it yourself — the table is a script.** `make breaches` replants all five against your
+The last three come from a **second** review, which attacked a copy rather than reading it and found
+two material holes — neither in a control the first review had tested. `POST /api/v1/approvals` was
+unauthenticated, so an agent could create the approval it then spent; and a token refused at the
+transport produced no audit row at all, so the trail was blind to precisely the attacks above.
+[ADR-004](DECISIONS.md) has both, including why no test in the suite was positioned to catch the
+second.
+
+**Re-run it yourself — the table is a script.** `make breaches` replants all eight against your
 checkout, requires the named tests to fail each time, restores every file, and exits non-zero if
-any control turns out not to be load-bearing. All controls restored; **32 tests green**.
-[ADR-003](DECISIONS.md) has the detail.
+any control turns out not to be load-bearing. All controls restored; **51 tests green**.
 
 ---
 
@@ -151,7 +160,9 @@ adversarial suite, and the two are never presented as one result.
 
 ![Approvals](docs/screenshots/approvals.png)
 
-**The audit trail** — every decision, refusals included, with what it was decided from.
+**The audit trail** — every decision, refusals included, with what it was decided from. Refusals
+made at the transport, before any tool is routed, are written by the verifier itself: they used to
+be silent, which meant the trail was blind to precisely the attacks above.
 
 ![Audit](docs/screenshots/audit.png)
 
@@ -159,9 +170,18 @@ adversarial suite, and the two are never presented as one result.
 
 ## Honest limits
 
-- **The approval-granting endpoint has no approver authentication.** `POST /api/v1/approvals` is
-  open, because the entire database is synthetic and the demo exists to be driven. In a real
-  deployment it belongs behind whatever authenticates staff. Stated rather than implied.
+- **The approval-granting endpoint authenticates a credential, not a person.**
+  `POST /api/v1/approvals` is gated on `AAB_APPROVER_TOKEN` — unset and the route is disabled, and
+  no bearer token the agent can hold will satisfy it. That is the boundary the claim needs and it is
+  the whole of it: one shared secret stands in for whatever authenticates staff, so anyone holding
+  it can approve as anyone, and `approved_by` is a string that holder supplied.
+
+  **This endpoint was open in every environment until a security review broke the headline claim
+  with it.** The reasoning had been that the MCP surface cannot reach it — an agent may
+  `request_approval` and cannot create one. But the agent is a process, not a tool list: mint a
+  token, `POST` an approval naming its own subject, call `issue_credit` over real MCP, and
+  `SELECT count(*) FROM irreversible_effect` returns 1. "No MCP route to it" is not the boundary
+  that matters when both surfaces share one origin.
 - **This is a resource server, not an authorization server.** The test authority mints tokens with
   real Ed25519 keys and is otherwise not an IdP: no clients, no consent, no discovery, no refresh.
   It is a lab instrument.
@@ -197,7 +217,7 @@ cd frontend && npm install && npm run dev    # the console on :3000
 
 | File | Purpose |
 |---|---|
-| [`DECISIONS.md`](DECISIONS.md) | ADR-001: the claim, threat model and kill test, **declared before implementation**. ADR-002: what is not built. ADR-003: the adversarial review |
+| [`DECISIONS.md`](DECISIONS.md) | ADR-001: the claim, threat model and kill test, **declared before implementation**. ADR-002: what is not built. ADR-003 and ADR-004: two adversarial reviews, and what the second one found that the first could not |
 | [`docs/threat-model.md`](docs/threat-model.md) | each adversary capability, its mitigation, and what is **not** mitigated |
 | [`docs/deployment.md`](docs/deployment.md) | topology and the honest cold-start note |
 | [`CLAUDE.md`](CLAUDE.md) | the operating rules this repository is built under |

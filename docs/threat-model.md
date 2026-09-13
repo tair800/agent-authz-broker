@@ -26,7 +26,7 @@ Where this file describes a mechanism that the suite does not exercise, it says 
 | The irreversible effect | A row crediting a synthetic account. It cannot be taken back. |
 | The approval | A human's consent, bound to a subject, tool, resource and amount. |
 | The effective scope | The server's own answer to "what may this caller do". |
-| The audit trail | What was asked, what was decided, and why. |
+| The audit trail | What was asked, what was decided, and why — **including refusals made at the transport**, before any tool is routed. See §10. |
 | The demonstration database | Synthetic and disposable. Listed so it is not confused. |
 
 Each line of that table is there because losing it loses something specific. Spending an approval
@@ -143,8 +143,14 @@ Two supporting decisions in `src/agent_authz_broker/tokens.py`:
 - **An unreadable `scope` claim yields the empty set**, never a coerced one. Two spellings are
   accepted because two spellings are in real use; a third shape is not guessed at.
 
-Chain depth is capped at ten links, which bounds the work an attacker can force out of a single
-token rather than defending any authorization property.
+Chain depth is capped at ten links, and the **bearer string is capped at 16 KB before it is parsed
+at all**. The depth cap defends no authorization property; it bounds the intersection work. It did
+not bound the dominant cost, which a reviewer demonstrated: a deeply nested `act` raises
+`RecursionError` inside the JSON parse of the *unverified* decode — before an issuer or a signature
+is consulted, so no signing key is needed — and `RecursionError` is not a `PyJWTError`, so it left
+`verify_token` as an uncaught 500 with no audit row. Exhausting the stack takes roughly forty
+kilobytes; a real ten-link chain is a few. The size cap is the guard that closes it, the `except`
+clause behind it is tested with the cap lifted, and both are planted as breach 8.
 
 **Covered by:** kill tests **B** (single hop) and **B multi-hop** — the second is the one that
 matters, because an implementation that checked only the root and the leaf would pass the first and
@@ -194,15 +200,40 @@ added the database lookup becomes decoration.
 turn. Parameterised rather than written six times because the point is the *set*: an approval bound
 to fewer things than this authorises something nobody agreed to.
 
+### The hole this section had, and what closed it
+
+Everything above was true and none of it was sufficient, because the lookup answers *"does a
+matching approval exist"* and the agent could simply **create one**.
+
+`POST /api/v1/approvals` was unauthenticated in every environment. The reasoning was that the MCP
+surface cannot reach it: an agent may `request_approval` and cannot create one. But the agent is a
+**process**, not a tool list, and it makes ordinary HTTP requests to the same origin the tools are
+served from. §3 of this document already grants the adversary "write access to the resource server's
+database … through the server's own API" — so this attack was inside the stated capabilities while
+this section called the class mitigated.
+
+A read-only reviewer drove it end to end against the deployed configuration: mint a token, `POST` an
+approval naming its own subject, call `issue_credit` over real MCP. `SELECT count(*) FROM
+irreversible_effect` returned **1**. The headline claim was false on the deployed path.
+
+**What closed it.** `AAB_APPROVER_TOKEN` now gates the route: unset disables it entirely, exactly as
+the admin reset behaves, and a bearer token the test authority mints — valid signature, right
+audience, correct scopes — is refused. Authority to *act* and authority to *approve* are different
+authorities, and the fix is that no credential an agent can hold satisfies the second. `make
+breaches` plants breach 6 by deleting the gate and requires the tests to fail.
+
 **Not mitigated.**
 
+- **There is still no approver *identity*.** One shared secret stands in for whatever authenticates
+  staff. Anyone holding it can approve as anyone, and the audit trail records `approved_by` as a
+  string that secret-holder supplied. It is a credential boundary, not an identity system, and
+  ADR-002 is where that scope decision lives.
 - **A human approving the wrong thing.** If a person approves a credit to the wrong account, the
   server issues it. This mechanism binds consent to an action; it does not evaluate the consent.
   Everything downstream of "the human clicked approve" is outside the boundary.
-- **A compromised approval channel.** Approvals are created out-of-band. If an attacker can drive
-  the interface a human approves through — by holding that human's session, or by compromising the
-  console — they can create approvals. The server checks that an approval exists and matches; it
-  cannot check that the human who created it meant to.
+- **A compromised approval channel.** If an attacker holds the approver credential, or drives the
+  interface a human approves through, they can create approvals. The server checks that an approval
+  exists and matches; it cannot check that the human who created it meant to.
 - **Social engineering of the approver.** An agent under adversarial influence can produce a very
   persuasive request. Nothing here evaluates persuasiveness. The mitigation is that a human sees
   the concrete bound facts — subject, tool, account, amount — rather than the agent's summary of
@@ -347,6 +378,19 @@ change that only surfaces as a committed key.
 **Algorithm confusion.** `ALGORITHMS` is `["EdDSA", "RS256"]`. `none` and the HMAC family are
 absent by construction, not by filtering: an HMAC-verified token lets anyone holding the
 verification key mint one, which for a resource server is the same as having no check at all.
+
+**The audit trail, and the refusals it used to miss.** A token refused by `BrokerTokenVerifier` —
+wrong audience, forged signature, expired, unknown issuer, unparsable — never reaches
+`effects.call_tool`, because the SDK rejects the request first. `call_tool` was the only thing that
+wrote audit rows, so on the deployed transport **every one of those refusals was silent**, while the
+README said *"every decision, refusals included"*. The suite could not see it: the kill tests and
+the matrix run call `call_tool` directly, so in the harness the flagship attack *was* audited.
+
+A reviewer drove the real client and counted the rows: wrong audience, 0; expired, 0; bad signature,
+0; garbage, 0. The audit trail was blind to exactly the probes this project exists to detect. The
+verifier now writes the row itself, with no subject and no token id when the token did not
+authenticate — recording the identity it *claimed* would be the trail repeating an attacker's
+assertion as though the server had checked it. Breach 7 plants the removal.
 
 **The denial reason as a leak.** Reasons are a closed `Literal` set and they are specific —
 `audience_mismatch` tells a caller *why*. That is a deliberate trade: an attacker learns a little,

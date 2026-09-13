@@ -47,8 +47,11 @@ class Breach:
 AUTHZ = "src/agent_authz_broker/authz.py"
 APPROVALS = "src/agent_authz_broker/approvals.py"
 MCP = "src/agent_authz_broker/mcp_server.py"
+APP = "src/agent_authz_broker/app.py"
+TOKENS = "src/agent_authz_broker/tokens.py"
 KILL = "tests/test_kill_criteria.py"
 SURFACE = "tests/test_mcp_surface.py"
+BOUNDARIES = "tests/test_authority_boundaries.py"
 
 BREACHES: tuple[Breach, ...] = (
     Breach(
@@ -109,6 +112,41 @@ BREACHES: tuple[Breach, ...] = (
         tests=(
             f"{SURFACE}::test_the_advertised_tool_list_is_exactly_the_six",
             f"{SURFACE}::test_no_reset_shaped_tool_is_reachable_over_mcp",
+        ),
+    ),
+    # 6-8 come from the second review, which found two of these open rather than merely untested.
+    # They are planted the same way so that the fixes are held to the same standard as the
+    # controls that were right the first time.
+    Breach(
+        number=6,
+        control="granting an approval needs a credential no agent holds",
+        file=APP,
+        before="dependencies=[Depends(_require_approver_token)],",
+        after="",
+        tests=(
+            f"{BOUNDARIES}::test_no_approval_can_be_granted_when_no_approver_credential_is_configured",
+            f"{BOUNDARIES}::test_an_agents_own_bearer_token_cannot_grant_it_an_approval",
+        ),
+    ),
+    Breach(
+        number=7,
+        control="a refusal at the transport is written to the audit trail",
+        file=MCP,
+        before="        if self._engine is None:",
+        after="        if True:  # noqa: SIM103",
+        tests=(
+            f"{BOUNDARIES}::test_a_token_minted_for_another_resource_server_is_audited_at_the_transport",
+            f"{BOUNDARIES}::test_a_garbage_bearer_string_is_audited_rather_than_dropped",
+        ),
+    ),
+    Breach(
+        number=8,
+        control="an unparsable token is refused rather than raised out of verify_token",
+        file=TOKENS,
+        before="    except (jwt.PyJWTError, RecursionError, ValueError):",
+        after="    except jwt.PyJWTError:",
+        tests=(
+            f"{BOUNDARIES}::test_the_parse_refuses_rather_than_raising_even_with_the_size_cap_lifted",
         ),
     ),
 )

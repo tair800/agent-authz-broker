@@ -1,7 +1,7 @@
 [
   {
-    "audit_id": "aud_00e0774319a04ff2",
-    "at": "2026-09-13T11:20:04.788508+00:00",
+    "audit_id": "aud_339279782d734881",
+    "at": "2026-09-13T12:21:49.054272+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "hardened",
@@ -16,8 +16,8 @@
     "effect_id": null
   },
   {
-    "audit_id": "aud_05c5065902ff452b",
-    "at": "2026-09-13T11:20:04.744779+00:00",
+    "audit_id": "aud_e0065fb9f2bb4c86",
+    "at": "2026-09-13T12:21:49.032996+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "hardened",
@@ -28,12 +28,12 @@
       "account:read",
       "credit:issue"
     ],
-    "approval_id": "apr_ba5340f1522343c2",
-    "effect_id": "eff_14a6de2bea254328"
+    "approval_id": "apr_a8232674e61c4c99",
+    "effect_id": "eff_0325bcbd844c4f51"
   },
   {
-    "audit_id": "aud_1c14c40228af45f0",
-    "at": "2026-09-13T11:20:04.620408+00:00",
+    "audit_id": "aud_b168214211d441e6",
+    "at": "2026-09-13T12:21:48.965818+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "naive",
@@ -48,8 +48,8 @@
     "effect_id": null
   },
   {
-    "audit_id": "aud_6d4e467f729d46c7",
-    "at": "2026-09-13T11:20:03.480134+00:00",
+    "audit_id": "aud_8334310bc6b84d56",
+    "at": "2026-09-13T12:21:48.952320+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "naive",
@@ -60,12 +60,12 @@
       "account:read",
       "credit:issue"
     ],
-    "approval_id": "apr_f536f55c3507474e",
-    "effect_id": "eff_08687d2408ac43e0"
+    "approval_id": "apr_12c14435e5284dd0",
+    "effect_id": "eff_0a42a69a21a04648"
   },
   {
-    "audit_id": "aud_291f9156785a4804",
-    "at": "2026-09-13T11:20:02.686580+00:00",
+    "audit_id": "aud_dbc8a51af475461c",
+    "at": "2026-09-13T12:21:48.898691+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "hardened",
@@ -80,8 +80,8 @@
     "effect_id": null
   },
   {
-    "audit_id": "aud_c0cb5608d5624b9c",
-    "at": "2026-09-13T11:20:02.542876+00:00",
+    "audit_id": "aud_1023ea91cbaf44c7",
+    "at": "2026-09-13T12:21:48.850900+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "naive",
@@ -96,8 +96,8 @@
     "effect_id": null
   },
   {
-    "audit_id": "aud_faa5c3b5343a4da7",
-    "at": "2026-09-13T11:20:02.380043+00:00",
+    "audit_id": "aud_b81f4bf9459043f4",
+    "at": "2026-09-13T12:21:48.794685+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "hardened",
@@ -112,8 +112,8 @@
     "effect_id": null
   },
   {
-    "audit_id": "aud_ff09aa76def54a06",
-    "at": "2026-09-13T11:20:02.263459+00:00",
+    "audit_id": "aud_2bc8f836ba03421d",
+    "at": "2026-09-13T12:21:48.707569+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "naive",
@@ -128,8 +128,8 @@
     "effect_id": null
   },
   {
-    "audit_id": "aud_67613da5e31e43f1",
-    "at": "2026-09-13T11:20:02.195309+00:00",
+    "audit_id": "aud_275c23f77d944570",
+    "at": "2026-09-13T12:21:48.672231+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "hardened",
@@ -144,8 +144,8 @@
     "effect_id": null
   },
   {
-    "audit_id": "aud_b0531516b4b24a56",
-    "at": "2026-09-13T11:20:02.083110+00:00",
+    "audit_id": "aud_bd2e5f9fc25e4857",
+    "at": "2026-09-13T12:21:48.597478+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "naive",
@@ -157,12 +157,12 @@
       "account:read",
       "credit:issue"
     ],
-    "approval_id": "apr_90380ccd9fb64e59",
-    "effect_id": "eff_c72fa28e495e4775"
+    "approval_id": "apr_064335e1712e4ec5",
+    "effect_id": "eff_d19f2ce711bc41d0"
   },
   {
-    "audit_id": "aud_6ccaf16220dd4c41",
-    "at": "2026-09-13T11:20:01.939318+00:00",
+    "audit_id": "aud_55b34f25a86c43b6",
+    "at": "2026-09-13T12:21:48.481301+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "hardened",
@@ -177,8 +177,8 @@
     "effect_id": null
   },
   {
-    "audit_id": "aud_b77b8f934a734040",
-    "at": "2026-09-13T11:20:01.781107+00:00",
+    "audit_id": "aud_55b66698dd4240ad",
+    "at": "2026-09-13T12:21:48.413468+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "naive",
@@ -189,12 +189,12 @@
       "account:read",
       "credit:issue"
     ],
-    "approval_id": "apr_6fa0ff9fcdcd44a4",
-    "effect_id": "eff_8ff0c06548a54ee4"
+    "approval_id": "apr_81f990ef19b5483c",
+    "effect_id": "eff_67d255f556f745f3"
   },
   {
-    "audit_id": "aud_33bb94e904fe436c",
-    "at": "2026-09-13T11:20:01.635424+00:00",
+    "audit_id": "aud_7032f298d9004950",
+    "at": "2026-09-13T12:21:48.358828+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "hardened",
@@ -205,12 +205,12 @@
       "account:read",
       "credit:issue"
     ],
-    "approval_id": "apr_7e6cf54167f7422e",
-    "effect_id": "eff_dfe53efa3fce4c99"
+    "approval_id": "apr_d49f9b0133a04a8c",
+    "effect_id": "eff_d6666e528c7b443d"
   },
   {
-    "audit_id": "aud_f927e4ff5bdb4767",
-    "at": "2026-09-13T11:20:01.420711+00:00",
+    "audit_id": "aud_e1e3e5d5d0f64c2c",
+    "at": "2026-09-13T12:21:48.251543+00:00",
     "subject": "agent-7",
     "tool": "issue_credit",
     "policy": "naive",
@@ -221,7 +221,7 @@
       "account:read",
       "credit:issue"
     ],
-    "approval_id": "apr_79f6ab3a22af4187",
-    "effect_id": "eff_9cf28cbe1f914aef"
+    "approval_id": "apr_4f9bbf69312f4bd0",
+    "effect_id": "eff_65d8da439ec54a80"
   }
 ]

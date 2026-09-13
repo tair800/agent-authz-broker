@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ["Settings"]
@@ -47,3 +47,27 @@ class Settings(BaseSettings):
             "admin infrastructure and is deliberately NOT an MCP tool: see ADR-001."
         ),
     )
+
+    approver_token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Bearer token a human presents to grant an approval. Unset disables POST "
+            "/api/v1/approvals entirely. It is NOT an MCP credential and the test authority does "
+            "not mint it: an agent holding a perfectly valid, correctly attenuated token must not "
+            "be able to approve its own irreversible action."
+        ),
+    )
+
+    @field_validator("admin_reset_token", "approver_token", mode="after")
+    @classmethod
+    def _blank_is_unset(cls, value: SecretStr | None) -> SecretStr | None:
+        """An empty value disables the gate rather than arming it with the empty string.
+
+        ``AAB_APPROVER_TOKEN=`` in a shell, a Makefile forwarding an unset variable, or a dashboard
+        field somebody cleared all arrive here as ``""``. Armed with that, the route answers 401 to
+        everything and looks configured. Unset is the honest reading and it is also the safe one:
+        the route becomes unavailable, which is what both of these credentials mean by absent.
+        """
+        if value is None or not value.get_secret_value().strip():
+            return None
+        return value

@@ -30,6 +30,18 @@ __all__ = ["ALGORITHMS", "verify_token"]
 #: holding the verification key mint one, which for a resource server is the same as no check.
 ALGORITHMS = ["EdDSA", "RS256"]
 
+#: Refuse anything larger before parsing it. **This is the guard that closes the crash below.**
+#:
+#: The depth cap in :func:`_chain` bounds the *intersection* work, and a reviewer pointed out that
+#: this is not the dominant cost: a token carrying a deeply nested ``act`` raises ``RecursionError``
+#: inside the JSON parse of the **unverified** decode, before an issuer or a signature has been
+#: looked at, so no signing key is needed to cause it.
+#:
+#: Exhausting the stack that way takes roughly forty kilobytes of payload. A real delegation chain
+#: is bounded at ten links, and ten links of plausible scopes is a few. Sixteen kilobytes is well
+#: above anything legitimate and well below anything dangerous.
+MAX_TOKEN_BYTES = 16 * 1024
+
 
 def _scopes(raw: Any) -> frozenset[str]:
     """Read a scope claim in either spelling, and refuse to guess at anything else.
@@ -56,7 +68,7 @@ def _chain(payload: dict[str, Any]) -> tuple[tuple[DelegationLink, ...], DenialR
     precisely backwards, and exactly the kind of fail-open a malicious client would aim for.
     """
     links: list[DelegationLink] = []
-    node = payload.get("act")
+    node: Any = payload.get("act")
     depth = 0
     while node is not None:
         if not isinstance(node, dict) or not isinstance(node.get("sub"), str):
@@ -89,6 +101,10 @@ def verify_token(
         than an exception because refusal is a normal outcome here, and an exception would tempt a
         caller into a bare ``except`` that swallows the difference between *expired* and *forged*.
     """
+    # Length first, because everything below parses attacker-controlled bytes.
+    if len(token.encode("utf-8", "ignore")) > MAX_TOKEN_BYTES:
+        return "token_malformed"
+
     try:
         header = jwt.get_unverified_header(token)
     except jwt.PyJWTError:
@@ -96,9 +112,18 @@ def verify_token(
 
     # The unverified issuer selects a candidate key set and nothing else. It is re-read from the
     # verified payload below and compared, so a lie here buys an attacker a failed signature.
+    #
+    # `RecursionError` is caught alongside `PyJWTError` because it is what a deeply nested `act`
+    # produces here, and it is not a subclass of `PyJWTError`, so it used to propagate out of this
+    # function as an uncaught 500 with no audit row.
+    #
+    # Behind MAX_TOKEN_BYTES it is now unreachable, and this repository does not ship guards that
+    # cannot fail without saying so. It is kept, and tested with the cap lifted, because the cap is
+    # a number somebody may raise one day for a legitimately longer chain -- and on that day the
+    # difference between this line and no line is a refusal versus a 500.
     try:
         unverified = jwt.decode(token, options={"verify_signature": False})
-    except jwt.PyJWTError:
+    except (jwt.PyJWTError, RecursionError, ValueError):
         return "token_malformed"
     claimed_issuer = unverified.get("iss")
     if not isinstance(claimed_issuer, str) or claimed_issuer not in jwks_by_issuer:
@@ -140,9 +165,17 @@ def verify_token(
     except jwt.PyJWTError:
         return "signature_invalid"
 
+    # `aud` is a string or a list of strings, and nothing else is guessed at. `tuple(anything
+    # iterable)` used to be the rule, which quietly accepted a JSON *object* by taking its keys and
+    # raised an uncaught TypeError on a number. Neither widened authority — a dict behaved as the
+    # multi-audience list it resembled — but "whatever iterates" is not a specification, and the
+    # next claim parsed that way might be one where it matters.
     audience = payload["aud"]
-    audiences = (audience,) if isinstance(audience, str) else tuple(audience)
-    if not all(isinstance(item, str) for item in audiences):
+    if isinstance(audience, str):
+        audiences: tuple[str, ...] = (audience,)
+    elif isinstance(audience, list) and all(isinstance(item, str) for item in audience):
+        audiences = tuple(audience)
+    else:
         return "token_malformed"
 
     chain, failure = _chain(payload)

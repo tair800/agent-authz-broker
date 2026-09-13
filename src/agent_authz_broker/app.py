@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import hmac
 import json
 import os
 from collections.abc import AsyncIterator
@@ -200,15 +201,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 for row in rows
             ]
 
-    @app.post("/api/v1/approvals", status_code=status.HTTP_201_CREATED)
-    async def grant(body: GrantApproval) -> dict[str, Any]:
-        """A human grants one approval.
+    async def _require_approver_token(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> None:
+        """Gate approval-granting on a credential the test authority does not mint.
 
-        On the console API and not on MCP, which is the whole distinction: the agent may ask for an
-        approval and cannot create one. In a real deployment this route would sit behind whatever
-        authenticates staff; here it is open because the entire database is synthetic and the demo
-        exists to be driven. **That is a real limitation and the README says so** rather than
-        implying an approver-authentication story this build does not have.
+        **This route used to be open in every environment, and that falsified the headline claim.**
+        The reasoning behind leaving it open was that the MCP surface cannot reach it — an agent can
+        `request_approval` and cannot create one. But the agent is a process, not a tool list: it
+        makes an ordinary HTTP POST to the same origin. A reviewer drove it end to end against the
+        deployed configuration — mint a token, POST an approval naming its own subject, call
+        `issue_credit` over real MCP — and read one row out of `irreversible_effect`. The confused
+        deputy that `docs/threat-model.md` §6 called mitigated was reachable in one request.
+
+        "No MCP route to it" is not the boundary that matters when both surfaces share one origin.
+        The boundary that matters is whether the credential that grants an approval is one the agent
+        can hold, so that is what this checks.
+
+        Unset disables the route rather than leaving it open, exactly as the reset does: a demo
+        whose approvals anyone can mint is a demo whose irreversible-effect count means nothing.
+        `make seed` and the measurement create approvals in-process and are unaffected.
+        """
+        expected = resolved.approver_token
+        if expected is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        presented = (authorization or "").removeprefix("Bearer ").strip()
+        if not presented or not hmac.compare_digest(presented, expected.get_secret_value()):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    @app.post(
+        "/api/v1/approvals",
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(_require_approver_token)],
+    )
+    async def grant(body: GrantApproval) -> dict[str, Any]:
+        """A human grants one approval, with a credential no agent token can stand in for.
+
+        On the console API and not on MCP — the agent may ask for an approval and cannot create one
+        — and now behind `AAB_APPROVER_TOKEN`, which the test authority does not mint and which no
+        bearer token accepted by the MCP transport will satisfy. Still not an approver *identity*:
+        one shared secret stands in for whatever authenticates staff in a real deployment, and the
+        README says so rather than implying a story this build does not have.
         """
         async with AsyncSession(engine) as session, session.begin():
             approval = await create_approval(
@@ -349,8 +382,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         presented = (authorization or "").removeprefix("Bearer ").strip()
         # Constant-time comparison: a timing oracle on a demo reset is not a serious risk, but
         # writing the unsafe version here and the safe one elsewhere is how the unsafe one spreads.
-        import hmac
-
         if not presented or not hmac.compare_digest(presented, expected.get_secret_value()):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
