@@ -125,9 +125,15 @@ in-process lock would pass the test and fail in production behind two workers, s
 
 A **naive verifier** that does what a competent engineer writes when the brief is "check the token":
 verify the signature against the JWKS, check `exp`, and read the leaf `scope` claim. It is not a straw
-man — it is the check that most published guidance implies is sufficient, and it fails A, B and C
-exactly because those are the bug classes a signature check cannot see. Both verifiers run the same
-scenarios against the same database and the counts are compared.
+man — it is the check that most published guidance implies is sufficient. Both verifiers run the
+same scenarios against the same database and the counts are compared.
+
+> **Corrected by measurement, 2026-09-13.** This paragraph originally predicted the naive verifier
+> would fail *"A, B and C"*. It fails **A and B**. Scenario C turns on approval, and approval is a
+> layer *below* both policies — they differ only where the difference is a token check. The measured
+> matrix says naive permits **2 of 5** attacks, not 3, and that is what the README publishes. The
+> prediction is left here rather than edited away: a baseline overstated in the repository's own
+> favour is exactly the thing a reader should be able to catch it doing.
 
 **This repository does not claim MCP servers in general are insecure**, and it does not claim the
 naive verifier is what any particular product ships.
