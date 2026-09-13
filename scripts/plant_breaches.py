@@ -139,11 +139,34 @@ def _pytest(tests: tuple[str, ...]) -> int:
     ).returncode
 
 
+def _read(path: Path) -> str:
+    """Read without translating line endings, so writing the same string back is a no-op.
+
+    The first version used ``read_text``/``write_text``. On Windows that reads CRLF as \n and
+    writes \n back as CRLF, so restoring an LF-checked-out file rewrote every line of it. The run
+    reported five breaches caught and then a dirty tree — which is the only reason this is a
+    comment about a fixed bug rather than a few thousand spurious line changes in a commit.
+    """
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def _write(path: Path, content: str) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(content)
+
+
+def _as_written(anchor: str, content: str) -> str:
+    """The anchor with this file's line ending, so a CRLF checkout matches too."""
+    return anchor.replace("\n", "\r\n") if "\r\n" in content else anchor
+
+
 def _run(breach: Breach) -> bool:
     """Plant one breach, run its tests, restore. True if the tests caught it."""
     path = ROOT / breach.file
-    original = path.read_text(encoding="utf-8")
-    occurrences = original.count(breach.before)
+    original = _read(path)
+    before = _as_written(breach.before, original)
+    occurrences = original.count(before)
     if occurrences != 1:
         print(
             f"  breach {breach.number}: cannot plant — its anchor appears {occurrences} times in "
@@ -152,10 +175,10 @@ def _run(breach: Breach) -> bool:
         return False
 
     try:
-        path.write_text(original.replace(breach.before, breach.after), encoding="utf-8")
+        _write(path, original.replace(before, _as_written(breach.after, original)))
         code = _pytest(breach.tests)
     finally:
-        path.write_text(original, encoding="utf-8")
+        _write(path, original)
 
     caught = code != 0
     verdict = "CAUGHT (its tests failed, as required)" if caught else "NOT CAUGHT"
