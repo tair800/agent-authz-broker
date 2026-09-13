@@ -20,7 +20,8 @@ import asyncio
 import pytest
 
 from agent_authz_broker.authz import Decision, authorize
-from tests.conftest import Lab
+from agent_authz_broker.testauthority import Flaw
+from tests.conftest import Lab, Mutation
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -128,7 +129,7 @@ async def test_C_irreversible_tool_without_an_approval_does_nothing(lab: Lab) ->
     ],
 )
 async def test_C_an_approval_that_does_not_match_is_not_an_approval(
-    lab: Lab, mutation: str, reason: str
+    lab: Lab, mutation: Mutation, reason: str
 ) -> None:
     """Every binding in ADR-001's approval table, each one removed in turn.
 
@@ -218,7 +219,7 @@ async def test_E_the_correct_request_succeeds_exactly_once(lab: Lab) -> None:
         ("missing_scope", "insufficient_effective_scope"),
     ],
 )
-async def test_a_flawed_token_never_reaches_the_effect(lab: Lab, flaw: str, reason: str) -> None:
+async def test_a_flawed_token_never_reaches_the_effect(lab: Lab, flaw: Flaw, reason: str) -> None:
     token = lab.authority.mint_flawed(
         flaw, subject="alice", audience=THIS_SERVER, scopes=[READ, CREDIT]
     )

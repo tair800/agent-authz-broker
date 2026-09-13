@@ -111,13 +111,15 @@ export function SourceBand({ source, generatedAt }: { source: DataSource; genera
         data-source="fixtures"
         className="rounded-md border border-attenuated/40 bg-attenuated-bg px-3 py-2 text-attenuated"
       >
-        <span className="font-semibold">Committed fixtures, not a measurement.</span>{" "}
+        <span className="font-semibold">A committed measurement, not a live broker.</span>{" "}
         <span className="text-ink-dim">
-          <span className="tabular">BROKER_API_BASE_URL</span> is unset, so this console is
-          rendering <span className="tabular">frontend/fixtures/</span>. They reproduce the matrix
-          fixed in <span className="tabular">DECISIONS.md</span> ADR-001 before any code existed.
-          Attached to the broker, these same screens show counts read from the{" "}
-          <span className="tabular">irreversible_effect</span> table.
+          <span className="tabular">BROKER_API_BASE_URL</span> is unset, so this console renders the
+          matrix committed at <span className="tabular">artifacts/matrix.json</span> — written by{" "}
+          <span className="tabular">python -m agent_authz_broker.demo</span>, which runs every
+          scenario under both policies against real PostgreSQL and counts{" "}
+          <span className="tabular">irreversible_effect</span> rows from a clean database each time.
+          Every number here was measured; none was typed. Attached to a running broker, these same
+          screens show that database live.
         </span>
       </p>
     );

@@ -1,0 +1,5 @@
+# The CLI falls back to .gitignore when this file is absent, which would exclude `fixtures/` --
+# the measured matrix this console exists to render. Listing what to skip explicitly keeps it in.
+node_modules
+.next
+src/test

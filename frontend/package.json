@@ -5,11 +5,12 @@
   "description": "The authorization lab console: the security matrix, the delegation chain, approvals and the decision trail.",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run artifacts && next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "artifacts": "node scripts/copy-artifacts.mjs"
   },
   "dependencies": {
     "next": "15.5.25",

@@ -2,6 +2,199 @@
 
 **An agent can request an action. It cannot manufacture the authority to perform one.**
 
-**Status: in development.** The claim, the threat model and the kill test are fixed in
-[`DECISIONS.md`](DECISIONS.md) ADR-001 and in `tests/test_kill_criteria.py`, both written before the
-implementation. No result is published here until the suite has produced one.
+A validly signed agent token is not, by itself, authorisation. It might have been minted for a
+different service. It might claim a scope the human who delegated it never had. It might be asking
+for something irreversible that nobody approved. **A resource server that checks the signature and
+stops has caught none of those three.**
+
+This is an MCP resource server that checks all three, and a suite that proves each check is
+load-bearing by removing it and watching the tests go red.
+
+**Live console: <https://agent-authz-broker.vercel.app>**
+
+---
+
+## The measured result
+
+Six scenarios, two verifiers, one database. Written by
+`python -m agent_authz_broker.demo` into [`artifacts/matrix.json`](artifacts/matrix.json); every
+effect count is `SELECT count(*) FROM irreversible_effect` from a clean database. **No number below
+was typed.**
+
+| Scenario | Naive baseline | **Hardened** | Effects (naive → hardened) |
+|---|---|---|---|
+| Correct audience, attenuated scope, matching approval | allowed | **allowed** | 1 → 1 *(required)* |
+| **Valid token, minted for another resource server** | ⚠ allowed | **denied** `audience_mismatch` | **1 → 0** |
+| **Delegated token claims a scope its delegator lacked** | ⚠ allowed | **denied** `insufficient_effective_scope` | **1 → 0** |
+| Irreversible tool, no recorded approval | denied | denied `approval_required` | 0 → 0 |
+| Expired approval | denied | denied `approval_expired` | 0 → 0 |
+| One approval, two calls | denied on the 2nd | denied on the 2nd | 1 → 1 *(required)* |
+
+> **The naive baseline permits 2 of the 5 attacks. The hardened server permits 0.**
+> Total irreversible effects: **naive 4, hardened 2** — and both of the hardened server's two are
+> required, one for the valid request and one for the legitimate first call of the replay pair.
+
+**Be precise about what the baseline is.** It is the check ADR-001 predeclared before any code
+existed: verify the signature against the JWKS, check `exp`, read the leaf's `scope` claim. Both
+verifiers share the *same* approval layer, so they can only differ where the difference is a token
+check. That is why the last three rows are identical, and **ADR-001 predicted otherwise** — it said
+the naive verifier would also fail the no-approval scenario. It does not. The measurement corrected
+the prediction and [ADR-001](DECISIONS.md) keeps both.
+
+This repository does not claim MCP servers in general are insecure, and does not claim any product
+ships the naive check.
+
+---
+
+## The three checks
+
+### 1. Audience — the bug class a signature check cannot see
+
+```
+token: iss ✓  sig ✓  exp ✓  scope ✓        aud = https://other-service.example/mcp
+                                            we are https://broker.example/mcp
+→ denied, audience_mismatch, 0 effects
+```
+
+A token the agent legitimately holds for another service is refused **before any tool runs** — the
+verifier returns `None`, so the transport rejects it. The SDK's own `validate_token_resource` stays
+on behind that as a second line, not the first.
+
+### 2. Delegation attenuation — the intersection, never the leaf's claim
+
+```
+alice      account:read  account:flag
+agent-7    account:read  account:flag  credit:issue     ← what the leaf claims
+─────────────────────────────────────────────────────
+effective  account:read  account:flag                   ← what the server computes
+→ denied, insufficient_effective_scope, 0 effects
+```
+
+`effective = leaf ∩ act[0] ∩ … ∩ root`. Monotone, with no branch anywhere that adds a scope back.
+A multi-hop test pins the case that matters: a scope missing from the **middle** link is missing
+from the result, which an implementation checking only root and leaf would let through.
+
+### 3. Human approval, spent exactly once
+
+The irreversible tool's input schema is exactly `{account, amount}`. **There is no field a caller
+can use to assert approval** — no `approval_id`, no `approved`, no justification-as-authority — and
+a test walks the advertised schema to keep it that way. The server finds the approval itself, bound
+to subject, tool, account, amount, expiry and consumed-state.
+
+One approval authorises one effect because of two things that are not Python:
+
+```sql
+UPDATE approval SET consumed_at = now()
+ WHERE approval_id = :id AND consumed_at IS NULL   -- only one statement can match
+```
+
+…behind a `UNIQUE` constraint on `irreversible_effect.approval_id`. An `asyncio.Lock` would pass the
+concurrency test and fail behind two workers, so there is no lock in this repository.
+
+---
+
+## The adversarial review: five breaches planted, five caught
+
+A suite that has never failed is not evidence the system is safe. Each control was removed in turn
+and the suite re-run.
+
+| Breach planted | Result |
+|---|---|
+| `HARDENED` stops checking audience | scenario A **failed** |
+| attenuation returns the leaf's claim | both scenario B tests **failed** |
+| `consume_approval` drops `consumed_at IS NULL` | scenario D **failed** — as an `IntegrityError` |
+| approval lookup stops filtering on the account | scenario C `[other_account]` **failed** |
+| an `admin_reset` tool is registered on MCP | two surface tests **failed** |
+
+Breach 3 is the informative one: removing the application-level guard did not produce a wrong
+answer, it produced a constraint violation. The database refused the second effect on its own, which
+is the only reason it is honest to call that constraint a backstop rather than decoration.
+
+All controls restored; **32 tests green**. [ADR-003](DECISIONS.md) has the detail.
+
+---
+
+## Real MCP, over Streamable HTTP
+
+Driven by the SDK's own client against a running server, not asserted:
+
+```
+server:   agent-authz-broker 0.1.0
+protocol: 2025-11-25
+tools:    ['flag_account', 'issue_credit', 'ping', 'read_account', 'read_approval', 'request_approval']
+```
+
+`/.well-known/oauth-protected-resource/mcp` serves RFC 9728 protected-resource metadata. Reproduce
+with `uv run python scripts/mcp_smoke.py`.
+
+**What MCP conformance does and does not cover.** Protocol conformance says this is a well-formed
+MCP server — initialize, tool listing, schemas, transport. **It says nothing about audience
+validation, delegation attenuation or approval semantics.** Those are this repository's own
+adversarial suite, and the two are never presented as one result.
+
+---
+
+## What you are looking at
+
+**The security matrix** — every scenario, both verifiers, effects counted from the table.
+
+![The security matrix](docs/screenshots/matrix.png)
+
+**The delegation chain** — where authority was lost, rather than an assertion that it was.
+
+![Delegation and attenuation](docs/screenshots/chain.png)
+
+**Approvals** — target, expiry, and the consumed state that makes replay impossible.
+
+![Approvals](docs/screenshots/approvals.png)
+
+**The audit trail** — every decision, refusals included, with what it was decided from.
+
+![Audit](docs/screenshots/audit.png)
+
+---
+
+## Honest limits
+
+- **The approval-granting endpoint has no approver authentication.** `POST /api/v1/approvals` is
+  open, because the entire database is synthetic and the demo exists to be driven. In a real
+  deployment it belongs behind whatever authenticates staff. Stated rather than implied.
+- **This is a resource server, not an authorization server.** The test authority mints tokens with
+  real Ed25519 keys and is otherwise not an IdP: no clients, no consent, no discovery, no refresh.
+  It is a lab instrument.
+- **A stolen, still-valid token is not detected.** The design limits the blast radius to the
+  attenuated scope and stops irreversible action without approval. It does not stop a thief using a
+  live token within its scope for reversible reads. See [`docs/threat-model.md`](docs/threat-model.md).
+- **Everything is synthetic.** Invented accounts, invented balances, no payment rail, no external
+  call. The "irreversible effect" is a row in a demonstration table.
+- **Not built:** the blueprint's Keycloak gap analysis, Redis rate limiting, OpenTelemetry/Langfuse,
+  step-up authorization, CIMD-vs-DCR, and the full RFC 9728/8707/9207 conformance suites.
+  [ADR-002](DECISIONS.md) lists each one and records that rate limiting is now delivered nowhere in
+  the portfolio.
+
+---
+
+## Run it
+
+```bash
+make install     # uv sync --frozen
+make db-up       # PostgreSQL
+make migrate     # alembic upgrade head
+make killtest    # the adversarial suite against real PostgreSQL
+make api         # the MCP server + console API on :8000
+```
+
+```bash
+cd frontend && npm install && npm run dev    # the console on :3000
+```
+
+---
+
+## Documents
+
+| File | Purpose |
+|---|---|
+| [`DECISIONS.md`](DECISIONS.md) | ADR-001: the claim, threat model and kill test, **declared before implementation**. ADR-002: what is not built. ADR-003: the adversarial review |
+| [`docs/threat-model.md`](docs/threat-model.md) | each adversary capability, its mitigation, and what is **not** mitigated |
+| [`docs/deployment.md`](docs/deployment.md) | topology and the honest cold-start note |
+| [`CLAUDE.md`](CLAUDE.md) | the operating rules this repository is built under |
