@@ -1,0 +1,171 @@
+name: CI
+
+# Four jobs, deliberately separated by what they need rather than by what they are called.
+# The first needs nothing but a checkout. The second needs a real database, because the property
+# it proves — one approval authorises exactly one irreversible effect under concurrency — is a
+# property of PostgreSQL and cannot be demonstrated against a stand-in.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.11.15"
+
+jobs:
+  offline:
+    name: Lint, type check and the offline suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy
+      # No database, no network, no credential. The token verifier, the attenuation rule and the
+      # naive/hardened comparison are pure functions over minted tokens, and they are tested here.
+      # If this job ever needs a service container, the separation the design claims between the
+      # decision and the durable state has been lost.
+      - run: uv run pytest -m "not integration"
+
+  adversarial:
+    name: The adversarial suite against real PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aab
+          POSTGRES_PASSWORD: aab_ci_ephemeral
+          POSTGRES_DB: aab
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aab -d aab"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      # A throwaway container on the runner's loopback, destroyed with the job. The password is
+      # here on purpose: it is not a credential, and pretending it is would teach the wrong lesson
+      # about which values in this repository actually matter.
+      AAB_POSTGRES_DSN: postgresql://aab:aab_ci_ephemeral@localhost:5432/aab
+      AAB_ENVIRONMENT: ci
+      AAB_RESOURCE_SERVER_URL: https://broker.example/mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+
+      # Up, all the way down, and up again. A migration that cannot be reversed is a schema change
+      # that can only be rolled forward, and the one table whose constraints carry a security
+      # property is the last one anybody should be unable to back out of. Running `downgrade base`
+      # in CI is the only way that stays true — a `downgrade` nobody executes rots silently.
+      - name: Apply the migrations, and prove they reverse
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+      # Every count in this suite is `SELECT count(*) FROM irreversible_effect`. The suite is a
+      # standing CI job rather than a measurement taken once: if the audience check, the
+      # attenuation rule or the atomic consume ever regresses, this goes red and the README's
+      # claim is withdrawn instead of quietly surviving.
+      - name: The adversarial suite
+        run: uv run pytest -m integration
+
+  console:
+    name: Console lint, type check, test and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # `npm install`, not `npm ci`, and this is a deliberate reversal of the usual advice.
+      #
+      # On an earlier project in this portfolio the lockfile was complete — it pinned
+      # @rollup/rollup-linux-x64-gnu and lightningcss-linux-x64-gnu with the right os/cpu and a
+      # resolved URL — and `npm ci` skipped those platform-optional binaries on the runner anyway,
+      # installing 211 packages where a correct install is 216. vitest then died loading a native
+      # module that had never been fetched. `npm install` still honours the committed lockfile; it
+      # just resolves the platform's optional binaries. `--no-audit --no-fund` because neither
+      # output is actionable in CI.
+      - run: npm install --no-audit --no-fund
+      # The job is named for four checks and ran three: `lint` was missing while the name claimed
+      # it. `eslint-config-next` is already a devDependency and `package.json` already defines the
+      # script, so the gate existed and simply was not wired to CI.
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npx vitest run
+      - run: npm run build
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      # The full history is not needed — this scans the tree as it stands. A secret that was
+      # committed and later removed is a revocation problem, not a build-gate problem, and a gate
+      # that pretends otherwise fails forever on a repository that can never be made green.
+      - uses: actions/checkout@v4
+
+      - name: Fail if key material is committed
+        run: |
+          set -u
+          # Three patterns, kept narrow enough that documentation about secrets does not trip a
+          # gate meant to catch secrets. Each one is also written so that it does not match its
+          # own text in this file: `[A-Z ]*`, `["']?` and `[A-Za-z0-9_-]{8,}` all begin with `[`,
+          # which none of the character classes preceding them accept. That is what lets the
+          # scanner run over every tracked file including itself, with no exclusion list — and an
+          # exclusion list is exactly where somebody eventually hides a key.
+          cat > "$RUNNER_TEMP/patterns.txt" <<'PATTERNS'
+          -----BEGIN [A-Z ]*PRIVATE KEY-----
+          AAB_ADMIN_RESET_TOKEN["']?[[:space:]]*[:=][[:space:]]*["']?[A-Za-z0-9_+/=-]{12,}
+          eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}
+          PATTERNS
+
+          # `git ls-files` and not a directory walk: only tracked files can leak, and walking the
+          # tree would scan .venv and node_modules and find third-party test fixtures.
+          # `-I` skips binaries. `|| true` because grep exits 1 on no match, which is the
+          # outcome this job wants.
+          hits="$(git ls-files -z | xargs -0 grep -nIE -f "$RUNNER_TEMP/patterns.txt" || true)"
+
+          if [ -n "$hits" ]; then
+            printf '%s\n' "$hits"
+            echo "::error::key material, an admin reset value or a JWT literal is committed"
+            exit 1
+          fi
+          echo "secret scan: clean"
+
+      # The signing keys in this repository are generated in memory per process and never written
+      # to disk — see src/agent_authz_broker/testauthority.py. `.gitignore` excluding *.pem and
+      # keys/ is the second line rather than the first, and this asserts it is still there, since
+      # a dropped ignore rule is a silent change that only shows up as a committed key.
+      - name: The ignore rules that keep signing material out must still be present
+        run: |
+          set -eu
+          grep -qx '\*\.pem' .gitignore
+          grep -qx 'keys/' .gitignore
+          grep -qx '\.env' .gitignore
+          echo "ignore rules: present"

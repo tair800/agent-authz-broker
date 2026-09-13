@@ -1,0 +1,49 @@
+{
+  "generated_at": "2026-09-13T00:00:00Z",
+  "resource_server_url": "https://broker.example/mcp",
+  "scenarios": [
+    {
+      "id": "valid_request",
+      "title": "Correctly delegated, correctly scoped, approved by a human",
+      "description": "Audience names this server, the scope survives every link in the chain, and a matching unexpired approval is on file. Both verifiers allow it, and it produces exactly one effect. A suite that only refuses things has not shown the server works.",
+      "naive": { "decision": "allowed", "reason": null, "effects": 1 },
+      "hardened": { "decision": "allowed", "reason": null, "effects": 1 }
+    },
+    {
+      "id": "wrong_audience",
+      "title": "Valid token, minted for another resource server",
+      "description": "Real signature, known issuer, unexpired, credit:issue present and properly attenuated, approval on file. The only defect is aud. A verifier that checks the signature has no way to see this, and the agent gains authority at a service nobody granted it.",
+      "naive": { "decision": "allowed", "reason": null, "effects": 1 },
+      "hardened": { "decision": "denied", "reason": "audience_mismatch", "effects": 0 }
+    },
+    {
+      "id": "scope_amplification",
+      "title": "Delegated token claims a scope its delegator never held",
+      "description": "The chain is alice[account:read, account:flag] to agent-7[account:read, account:flag, credit:issue]. Reading the leaf's scope claim grants credit:issue. Intersecting the chain does not, because alice never had it to give.",
+      "naive": { "decision": "allowed", "reason": null, "effects": 1 },
+      "hardened": { "decision": "denied", "reason": "insufficient_effective_scope", "effects": 0 }
+    },
+    {
+      "id": "no_approval",
+      "title": "Irreversible tool called with no approval on file",
+      "description": "Token and scope are beyond reproach. No human ever approved this credit. The hardened server looks in its own database rather than at anything the caller said, finds nothing, and refuses.",
+      "naive": { "decision": "allowed", "reason": null, "effects": 1 },
+      "hardened": { "decision": "denied", "reason": "approval_required", "effects": 0 }
+    },
+    {
+      "id": "expired_approval",
+      "title": "The approval existed, and it had expired",
+      "description": "An approval without an expiry is an approval that is good forever. This one was real and is now past expires_at, which makes it evidence of a past decision rather than authority for this one.",
+      "naive": { "decision": "allowed", "reason": null, "effects": 1 },
+      "hardened": { "decision": "denied", "reason": "approval_expired", "effects": 0 }
+    },
+    {
+      "id": "approval_replay",
+      "title": "One approval, presented a second time",
+      "description": "The approval was valid and has already been spent. Consumption is a conditional UPDATE in PostgreSQL, so the second presentation loses the row rather than the argument. One approval authorises exactly one irreversible effect, including under two genuinely concurrent calls.",
+      "naive": { "decision": "allowed", "reason": null, "effects": 1 },
+      "hardened": { "decision": "denied", "reason": "approval_already_consumed", "effects": 0 }
+    }
+  ],
+  "totals": { "naive_effects": 6, "hardened_effects": 1 }
+}

@@ -70,7 +70,7 @@ class TestAuthority:
     def _sign(self, payload: dict[str, Any], *, key: Ed25519PrivateKey | None = None) -> str:
         return jwt.encode(
             payload,
-            key or self._key,  # type: ignore[arg-type]
+            key or self._key,
             algorithm="EdDSA",
             headers={"kid": self.key_id},
         )

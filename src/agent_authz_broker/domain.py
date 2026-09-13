@@ -11,11 +11,12 @@ lives on the untrusted side of that line.
 from __future__ import annotations
 
 import enum
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
+    "DENIAL_REASONS",
     "IRREVERSIBLE_TOOLS",
     "TOOL_SCOPES",
     "AuthzResult",
@@ -53,6 +54,10 @@ DenialReason = Literal[
     "approval_already_consumed",
     "unknown_tool",
 ]
+
+
+#: The same set at runtime, derived from the type so the two cannot drift apart.
+DENIAL_REASONS: frozenset[str] = frozenset(get_args(DenialReason))
 
 
 class DelegationLink(_Frozen):

@@ -115,7 +115,7 @@ def verify_token(
     try:
         payload = jwt.decode(
             token,
-            key=key,  # type: ignore[arg-type]
+            key=key,
             algorithms=ALGORITHMS,
             issuer=claimed_issuer,
             leeway=leeway,

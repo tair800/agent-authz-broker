@@ -1,0 +1,164 @@
+"""The lab the kill test drives, and the only place its fixtures are defined.
+
+`Lab` is a thin seam over the real thing and deliberately not a mock. Every call in it reaches the
+same `effects.call_tool` an MCP tool reaches, against real PostgreSQL, and `effect_count()` is a
+``SELECT count(*)`` rather than anything the system reports about itself. A harness that could
+answer differently from production would make the whole suite a statement about the harness.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Any, Literal
+
+import pytest_asyncio
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from agent_authz_broker.approvals import create_approval
+from agent_authz_broker.authz import HARDENED, NAIVE
+from agent_authz_broker.config import Settings
+from agent_authz_broker.db.engine import async_dsn
+from agent_authz_broker.db.models import Approval, AuditEvent, Base, IrreversibleEffect
+from agent_authz_broker.effects import ToolOutcome, call_tool
+from agent_authz_broker.testauthority import TestAuthority
+from agent_authz_broker.tokens import verify_token
+
+THIS_SERVER = "https://broker.example/mcp"
+
+Mutation = Literal[
+    "expired", "other_tool", "other_account", "other_subject", "other_amount", "already_consumed"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalHandle:
+    approval_id: str
+
+
+class Lab:
+    """One authority, one database, and the same call path the MCP tools use."""
+
+    def __init__(self, engine: AsyncEngine, authority: TestAuthority) -> None:
+        self.engine = engine
+        self.authority = authority
+        self.hardened = HARDENED
+        self.naive = NAIVE
+        self.jwks = {authority.issuer: authority.jwks()}
+
+    def verify(self, token: str) -> Any:
+        """Verified claims, or the reason they are not. The same call `effects.call_tool` makes."""
+        return verify_token(token, jwks_by_issuer=self.jwks)
+
+    async def call_issue_credit(
+        self, *, token: str, account: str, amount: int, policy: Any = None
+    ) -> ToolOutcome:
+        return await call_tool(
+            self.engine,
+            token=token,
+            tool="issue_credit",
+            arguments={"account": account, "amount": amount},
+            authority_jwks=self.jwks,
+            audience=THIS_SERVER,
+            policy=policy or self.hardened,
+        )
+
+    async def approve(
+        self, *, subject: str, tool: str, account: str, amount: int
+    ) -> ApprovalHandle:
+        async with AsyncSession(self.engine) as session, session.begin():
+            approval = await create_approval(
+                session,
+                subject=subject,
+                tool=tool,
+                account=account,
+                amount=amount,
+                approved_by="human@demo.invalid",
+            )
+            return ApprovalHandle(approval.approval_id)
+
+    async def approve_mutated(
+        self, mutation: Mutation, *, subject: str, tool: str, account: str, amount: int
+    ) -> ApprovalHandle:
+        """Record an approval that is wrong in exactly one of the ways ADR-001 binds against.
+
+        Each mutation removes exactly one binding, so a failure names which binding stopped mattering
+        rather than leaving a reader to guess.
+        """
+        now = dt.datetime.now(tz=dt.UTC)
+        fields: dict[str, Any] = {
+            "subject": subject,
+            "tool": tool,
+            "account": account,
+            "amount": amount,
+        }
+        ttl = 900
+        if mutation == "other_tool":
+            fields["tool"] = "flag_account"
+        elif mutation == "other_account":
+            fields["account"] = "ACC-OTHER"
+        elif mutation == "other_subject":
+            fields["subject"] = "mallory"
+        elif mutation == "other_amount":
+            fields["amount"] = amount + 1
+        elif mutation == "expired":
+            ttl = -60
+
+        async with AsyncSession(self.engine) as session, session.begin():
+            approval = await create_approval(
+                session, approved_by="human@demo.invalid", ttl_seconds=ttl, now=now, **fields
+            )
+            if mutation == "already_consumed":
+                approval.consumed_at = now
+            return ApprovalHandle(approval.approval_id)
+
+    async def effect_count(self) -> int:
+        """The number of irreversible effects, read from the table. The only grading input."""
+        async with AsyncSession(self.engine) as session:
+            total = await session.execute(select(func.count()).select_from(IrreversibleEffect))
+            return int(total.scalar_one())
+
+    async def approval_is_consumed(self, approval_id: str) -> bool:
+        async with AsyncSession(self.engine) as session:
+            approval = await session.get(Approval, approval_id)
+            assert approval is not None
+            return approval.consumed_at is not None
+
+
+def _settings() -> Settings:
+    return Settings()
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def engine() -> AsyncIterator[AsyncEngine]:
+    """One engine and one schema for the whole session.
+
+    Per-test it cost three minutes for seventeen tests, almost all of it `create_all` re-issuing
+    DDL that had not changed. Isolation comes from the per-test truncate below, which is the thing
+    that actually has to happen between tests.
+    """
+    created = create_async_engine(async_dsn(_settings()), poolclass=NullPool)
+    async with created.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    try:
+        yield created
+    finally:
+        await created.dispose()
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def lab(engine: AsyncEngine) -> AsyncIterator[Lab]:
+    """A clean database per test.
+
+    Deleted in dependency order inside one transaction. Two tests sharing a leftover approval would
+    make the concurrency test pass for the wrong reason, and an effect left behind by an earlier
+    test would make every count assertion in the suite meaningless.
+    """
+    async with AsyncSession(engine) as session, session.begin():
+        await session.execute(delete(IrreversibleEffect))
+        await session.execute(delete(AuditEvent))
+        await session.execute(delete(Approval))
+    yield Lab(engine, TestAuthority())

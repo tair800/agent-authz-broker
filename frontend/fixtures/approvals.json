@@ -1,0 +1,42 @@
+[
+  {
+    "approval_id": "apr-4f2a9c1e",
+    "subject": "agent-7",
+    "tool": "issue_credit",
+    "account": "ACC-1",
+    "amount": 500,
+    "expires_at": "2026-09-13T10:02:11Z",
+    "consumed_at": "2026-09-13T09:30:04Z",
+    "state": "consumed"
+  },
+  {
+    "approval_id": "apr-8b31d5a7",
+    "subject": "alice",
+    "tool": "issue_credit",
+    "account": "ACC-2",
+    "amount": 1200,
+    "expires_at": "2026-09-13T18:45:00Z",
+    "consumed_at": null,
+    "state": "pending"
+  },
+  {
+    "approval_id": "apr-1c07e6b2",
+    "subject": "alice",
+    "tool": "issue_credit",
+    "account": "ACC-4",
+    "amount": 75,
+    "expires_at": "2026-09-12T17:00:00Z",
+    "consumed_at": null,
+    "state": "expired"
+  },
+  {
+    "approval_id": "apr-2d55fa90",
+    "subject": "agent-7",
+    "tool": "issue_credit",
+    "account": "ACC-3",
+    "amount": 250,
+    "expires_at": "2026-09-13T20:15:00Z",
+    "consumed_at": null,
+    "state": "pending"
+  }
+]

@@ -1,0 +1,71 @@
+{
+  "valid_request": {
+    "scenario": "valid_request",
+    "links": [
+      {
+        "subject": "alice",
+        "scopes": ["account:read", "account:flag", "credit:issue"],
+        "role": "root"
+      },
+      { "subject": "agent-7", "scopes": ["account:read", "credit:issue"], "role": "leaf" }
+    ],
+    "effective_scopes": ["account:read", "credit:issue"],
+    "required_scope": "credit:issue",
+    "attenuated_away": []
+  },
+  "wrong_audience": {
+    "scenario": "wrong_audience",
+    "links": [
+      { "subject": "alice", "scopes": ["account:read", "credit:issue"], "role": "leaf" }
+    ],
+    "effective_scopes": ["account:read", "credit:issue"],
+    "required_scope": "credit:issue",
+    "attenuated_away": []
+  },
+  "scope_amplification": {
+    "scenario": "scope_amplification",
+    "links": [
+      { "subject": "alice", "scopes": ["account:read", "account:flag"], "role": "root" },
+      {
+        "subject": "agent-7",
+        "scopes": ["account:read", "account:flag", "credit:issue"],
+        "role": "leaf"
+      }
+    ],
+    "effective_scopes": ["account:read", "account:flag"],
+    "required_scope": "credit:issue",
+    "attenuated_away": ["credit:issue"]
+  },
+  "no_approval": {
+    "scenario": "no_approval",
+    "links": [
+      { "subject": "alice", "scopes": ["account:read", "credit:issue"], "role": "leaf" }
+    ],
+    "effective_scopes": ["account:read", "credit:issue"],
+    "required_scope": "credit:issue",
+    "attenuated_away": []
+  },
+  "expired_approval": {
+    "scenario": "expired_approval",
+    "links": [
+      { "subject": "alice", "scopes": ["account:read", "credit:issue"], "role": "leaf" }
+    ],
+    "effective_scopes": ["account:read", "credit:issue"],
+    "required_scope": "credit:issue",
+    "attenuated_away": []
+  },
+  "approval_replay": {
+    "scenario": "approval_replay",
+    "links": [
+      {
+        "subject": "alice",
+        "scopes": ["account:read", "account:flag", "credit:issue"],
+        "role": "root"
+      },
+      { "subject": "agent-7", "scopes": ["account:read", "credit:issue"], "role": "leaf" }
+    ],
+    "effective_scopes": ["account:read", "credit:issue"],
+    "required_scope": "credit:issue",
+    "attenuated_away": []
+  }
+}

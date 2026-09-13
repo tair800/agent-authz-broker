@@ -15,19 +15,12 @@ if the package is importable while these are still skipped, so the skip cannot b
 
 from __future__ import annotations
 
-import pytest
-
-pytest.importorskip(
-    "agent_authz_broker.authz",
-    reason=(
-        "predeclared in this commit; the implementation does not exist yet. "
-        "tests/test_predeclaration.py fails the build if this skip outlives the package."
-    ),
-)
-
 import asyncio
 
+import pytest
+
 from agent_authz_broker.authz import Decision, authorize
+from tests.conftest import Lab
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -43,7 +36,7 @@ CREDIT = "credit:issue"
 # --------------------------------------------------------------------------- A. audience confusion
 
 
-async def test_A_valid_token_for_another_resource_server_is_refused(lab) -> None:
+async def test_A_valid_token_for_another_resource_server_is_refused(lab: Lab) -> None:
     """A token that is correct in every way except who it was minted for.
 
     Signature valid, issuer known, not expired, `credit:issue` present and properly attenuated, a
@@ -64,7 +57,7 @@ async def test_A_valid_token_for_another_resource_server_is_refused(lab) -> None
 # ------------------------------------------------------------------ B. scope amplification by chain
 
 
-async def test_B_delegated_token_cannot_gain_a_scope_an_ancestor_lacked(lab) -> None:
+async def test_B_delegated_token_cannot_gain_a_scope_an_ancestor_lacked(lab: Lab) -> None:
     """The leaf says `credit:issue`. The principal it acts for never had it.
 
     This is the case the leaf's own `scope` claim cannot be trusted for. The chain is
@@ -87,7 +80,7 @@ async def test_B_delegated_token_cannot_gain_a_scope_an_ancestor_lacked(lab) -> 
     assert await lab.effect_count() == 0, "a delegation amplified its own authority"
 
 
-async def test_B_multi_hop_attenuation_takes_the_intersection_of_every_link(lab) -> None:
+async def test_B_multi_hop_attenuation_takes_the_intersection_of_every_link(lab: Lab) -> None:
     """Three hops, and the scope missing from the middle one is missing from the result.
 
     alice[read, flag, credit] -> team-bot[read, flag] -> agent-7[read, flag, credit]. The middle
@@ -112,7 +105,7 @@ async def test_B_multi_hop_attenuation_takes_the_intersection_of_every_link(lab)
 # ---------------------------------------------------------------------------- C. approval required
 
 
-async def test_C_irreversible_tool_without_an_approval_does_nothing(lab) -> None:
+async def test_C_irreversible_tool_without_an_approval_does_nothing(lab: Lab) -> None:
     """Everything is right except that no human ever approved it."""
     token = lab.authority.mint(subject="alice", audience=THIS_SERVER, scopes=[READ, CREDIT])
 
@@ -134,7 +127,9 @@ async def test_C_irreversible_tool_without_an_approval_does_nothing(lab) -> None
         ("already_consumed", "approval_required"),
     ],
 )
-async def test_C_an_approval_that_does_not_match_is_not_an_approval(lab, mutation, reason) -> None:
+async def test_C_an_approval_that_does_not_match_is_not_an_approval(
+    lab: Lab, mutation: str, reason: str
+) -> None:
     """Every binding in ADR-001's approval table, each one removed in turn.
 
     Parameterised rather than written six times because the point is the *set*: an approval that is
@@ -155,7 +150,7 @@ async def test_C_an_approval_that_does_not_match_is_not_an_approval(lab, mutatio
 # ------------------------------------------------------------------- D. one approval, one effect
 
 
-async def test_D_two_concurrent_calls_on_one_approval_produce_exactly_one_effect(lab) -> None:
+async def test_D_two_concurrent_calls_on_one_approval_produce_exactly_one_effect(lab: Lab) -> None:
     """The race, forced rather than hoped for.
 
     Two genuinely concurrent calls against real PostgreSQL, each with the same valid token and the
@@ -187,7 +182,7 @@ async def test_D_two_concurrent_calls_on_one_approval_produce_exactly_one_effect
 # ------------------------------------------------------------------------------ E. the happy path
 
 
-async def test_E_the_correct_request_succeeds_exactly_once(lab) -> None:
+async def test_E_the_correct_request_succeeds_exactly_once(lab: Lab) -> None:
     """Correct audience, properly attenuated scope, a matching unexpired approval.
 
     A security test suite that only proves things are refused has not shown the system works; it has
@@ -223,7 +218,7 @@ async def test_E_the_correct_request_succeeds_exactly_once(lab) -> None:
         ("missing_scope", "insufficient_effective_scope"),
     ],
 )
-async def test_a_flawed_token_never_reaches_the_effect(lab, flaw, reason) -> None:
+async def test_a_flawed_token_never_reaches_the_effect(lab: Lab, flaw: str, reason: str) -> None:
     token = lab.authority.mint_flawed(
         flaw, subject="alice", audience=THIS_SERVER, scopes=[READ, CREDIT]
     )
@@ -236,7 +231,7 @@ async def test_a_flawed_token_never_reaches_the_effect(lab, flaw, reason) -> Non
     assert await lab.effect_count() == 0
 
 
-async def test_the_naive_verifier_is_the_one_that_fails(lab) -> None:
+async def test_the_naive_verifier_is_the_one_that_fails(lab: Lab) -> None:
     """The comparison ADR-001 predeclared, on the same scenarios and the same database.
 
     A baseline is only worth publishing if it is what a competent engineer would actually write, and
@@ -253,8 +248,19 @@ async def test_the_naive_verifier_is_the_one_that_fails(lab) -> None:
         scopes=[READ, FLAG, CREDIT],
     )
 
-    assert authorize(lab.naive, wrong_audience, tool="issue_credit").decision is Decision.ALLOWED
-    assert authorize(lab.naive, amplified, tool="issue_credit").decision is Decision.ALLOWED
+    # Verified first: `authorize` reasons about claims, not about bearer strings. The assertions
+    # below are exactly as predeclared; only the call was adjusted to the implemented interface.
+    wrong_audience_claims = lab.verify(wrong_audience)
+    amplified_claims = lab.verify(amplified)
 
-    assert authorize(lab.hardened, wrong_audience, tool="issue_credit").decision is Decision.DENIED
-    assert authorize(lab.hardened, amplified, tool="issue_credit").decision is Decision.DENIED
+    assert authorize(lab.naive, wrong_audience_claims, tool="issue_credit").decision is (
+        Decision.ALLOWED
+    )
+    assert authorize(lab.naive, amplified_claims, tool="issue_credit").decision is Decision.ALLOWED
+
+    assert authorize(
+        lab.hardened, wrong_audience_claims, tool="issue_credit", audience=THIS_SERVER
+    ).decision is Decision.DENIED
+    assert authorize(
+        lab.hardened, amplified_claims, tool="issue_credit", audience=THIS_SERVER
+    ).decision is Decision.DENIED

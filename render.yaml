@@ -1,0 +1,80 @@
+# Render blueprint for the **public demonstration**. Free tier only; no paid resource is declared.
+#
+# What is deployed is an MCP resource server over a database of invented accounts. The one
+# irreversible tool credits a synthetic balance — there is no payment rail, no external call and no
+# real money anywhere in this repository. The worst a visitor can do is move an imaginary number,
+# and only after a human approval they created themselves through the console.
+#
+# **No database is declared here.** Render's own free PostgreSQL expires after 30 days, which would
+# take the demonstration down on a schedule. Neon's free tier does not expire, so the DSN is
+# attached as an environment variable instead. Declaring a database here would also create a
+# resource nobody asked for every time somebody applied this blueprint.
+
+services:
+  - type: web
+    name: agent-authz-broker
+    runtime: docker
+    plan: free
+    region: frankfurt # the Render region closest to Neon eu-central-1
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    # Liveness only. `/healthz` must not probe PostgreSQL: pointing the platform's restart trigger
+    # at a dependency check turns a Neon free-tier branch resume into a crash loop. Readiness, if
+    # the server exposes it, is for a human diagnosing a problem — not for the supervisor.
+    healthCheckPath: /healthz
+
+    envVars:
+      # ---- supplied by the platform ------------------------------------------------------
+      # Render injects PORT and the entrypoint binds it. Declared so the coupling is visible in
+      # the blueprint rather than only in the shell script.
+      - key: PORT
+        value: 10000
+
+      # ---- non-secret configuration ------------------------------------------------------
+      # Not `production`: the entrypoint refuses to seed a production instance, and an unseeded
+      # demonstration is an empty console. The accepted values are defined in
+      # src/agent_authz_broker/config.py.
+      - key: AAB_ENVIRONMENT
+        value: staging
+
+      # **This server's own identity, and the whole of the audience check.** A token is refused
+      # unless its `aud` names this exact string. It is therefore the one value here that will
+      # visibly break the deployment if it is wrong — every call will be denied with
+      # `audience_mismatch`, which is the server behaving correctly against a misconfiguration.
+      #
+      # It assumes Render assigns the default hostname for a service named `agent-authz-broker`.
+      # If the assigned hostname differs, correct this value; it cannot be derived from
+      # `fromService`, which yields a bare host with no scheme and no path.
+      - key: AAB_RESOURCE_SERVER_URL
+        value: https://agent-authz-broker.onrender.com/mcp
+
+      # The console's origin, and nothing else. A JSON array because pydantic-settings parses a
+      # complex field from JSON. Fail-closed: an origin absent from this list cannot call the
+      # read-only console API from a browser.
+      #
+      # This list has no bearing on authorization. CORS is a browser convention; it stops a page
+      # on another origin from reading a response, and it stops nothing that is not a browser. An
+      # attacker with a token does not use a browser. The audience, scope and approval checks are
+      # the security boundary; this is hygiene.
+      - key: AAB_CORS_ALLOW_ORIGINS
+        value: '["https://agent-authz-broker.vercel.app"]'
+
+      # ---- secrets: set in the Render dashboard, never in this file -----------------------
+      # `sync: false` means Render prompts for the value on first apply and stores it encrypted.
+      # The value never enters the repository, this blueprint, or a build log.
+
+      # The Neon connection string, pasted in exactly as Neon gives it. The libpq query
+      # parameters it carries are normalised in db/engine.py; see docs/deployment.md section 6.
+      - key: AAB_POSTGRES_DSN
+        sync: false
+
+      # The administrative reset for the demonstration database. ADR-001 predeclares that it must
+      # be unreachable through MCP — it is an operator route, not a tool the agent can see. Leave
+      # it unset and the reset is simply unavailable, which is the correct posture for any
+      # instance that is not a public demonstration.
+      #
+      # This must stay `sync: false` forever. A value here would be a committed credential that
+      # lets anyone who reads the repository wipe the demonstration.
+      - key: AAB_ADMIN_RESET_TOKEN
+        sync: false

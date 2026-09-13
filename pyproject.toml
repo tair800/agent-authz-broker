@@ -61,6 +61,7 @@ warn_unreachable = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "session"
 addopts = "-q"
 markers = [
     "integration: needs real PostgreSQL",

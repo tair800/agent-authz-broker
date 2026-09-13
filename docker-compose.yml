@@ -1,0 +1,12 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aab
+      POSTGRES_PASSWORD: aab_local_dev
+      POSTGRES_DB: aab
+    ports: ["127.0.0.1:15434:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aab -d aab"]
+      interval: 3s
+      retries: 20

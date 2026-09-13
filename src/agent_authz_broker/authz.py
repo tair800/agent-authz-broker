@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agent_authz_broker.domain import (
+    DENIAL_REASONS,
     TOOL_SCOPES,
     AuthzResult,
     Decision,
@@ -27,7 +28,9 @@ from agent_authz_broker.domain import (
     TokenClaims,
 )
 
-__all__ = ["HARDENED", "NAIVE", "Policy", "authorize", "effective_scopes"]
+# `Decision` is re-exported because `authz` is where a caller forms a decision; making them import
+# the enum from `domain` while calling `authorize` here would be a seam with no meaning behind it.
+__all__ = ["HARDENED", "NAIVE", "Decision", "Policy", "authorize", "effective_scopes"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +104,14 @@ def authorize(
         The decision, the reason when refused, and the effective scopes either way.
     """
     if isinstance(claims, str):
+        # A raw bearer string is not a denial reason. Accepting any `str` here let a caller pass a
+        # token where claims belong and receive a confident "denied" with the token as the reason --
+        # fail-closed, but unreadable. The check costs nothing and names the mistake.
+        if claims not in DENIAL_REASONS:
+            raise TypeError(
+                "authorize() takes verified claims or a DenialReason, not a raw token; "
+                "call tokens.verify_token first"
+            )
         return AuthzResult(decision=Decision.DENIED, reason=claims, policy=policy.name)
 
     required = TOOL_SCOPES.get(tool)
