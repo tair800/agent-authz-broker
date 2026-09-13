@@ -8,8 +8,13 @@ supposed to stop.
 ADR-003 recorded that each control here was removed by hand and the right test went red. A reviewer
 was right to point out that this left the claim exactly as checkable as the guard it was warning
 about: a table in a document. So the removals live here instead. Each one edits a source file,
-runs only the tests ADR-003 names for it, and requires them to **fail**. A control whose removal
+runs only the tests its ADR names for it, and requires them to **fail**. A control whose removal
 changes nothing is reported as a hole, and the script exits non-zero.
+
+Breaches 1-5 are ADR-003's. Breaches 6-8 cover the fixes for what a **second** review found -- an
+unauthenticated approval endpoint, an audit trail blind to refusals made at the transport, and an
+uncaught parser crash -- so the fixes are held to the same standard as the controls that were right
+the first time. See ADR-004.
 
     make breaches      # PostgreSQL must be up: make db-up
 
@@ -266,7 +271,7 @@ def main() -> int:
 
     print(
         f"{len(selected)} of {len(selected)} controls are load-bearing: "
-        "each removal was caught by the tests ADR-003 names."
+        "each removal was caught by the tests ADR-003 and ADR-004 name."
     )
     return 0
 
