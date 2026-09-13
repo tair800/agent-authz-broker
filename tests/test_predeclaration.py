@@ -5,10 +5,10 @@
 importable it has done its job, and from then on it is indistinguishable from a suite that silently
 does nothing.
 
-Project 3 shipped a guard that forbade importing a module that did not exist. It passed every run and
-protected nothing until a reviewer planted the breach it was supposed to stop. The lesson generalises:
-**a check that cannot fail is not a check**, and a skip nobody notices is the same failure wearing
-different clothes. This test is the alarm.
+Project 3 shipped a guard that forbade importing a module that did not exist. It passed every run
+and protected nothing until a reviewer planted the breach it was supposed to stop. The lesson
+generalises: **a check that cannot fail is not a check**, and a skip nobody notices is the same
+failure wearing different clothes. This test is the alarm.
 """
 
 from __future__ import annotations

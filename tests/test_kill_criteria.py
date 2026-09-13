@@ -25,11 +25,9 @@ pytest.importorskip(
     ),
 )
 
-# ruff: noqa: E402
 import asyncio
 
 from agent_authz_broker.authz import Decision, authorize
-from agent_authz_broker.testauthority import TestAuthority
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -92,9 +90,9 @@ async def test_B_delegated_token_cannot_gain_a_scope_an_ancestor_lacked(lab) -> 
 async def test_B_multi_hop_attenuation_takes_the_intersection_of_every_link(lab) -> None:
     """Three hops, and the scope missing from the middle one is missing from the result.
 
-    alice[read, flag, credit] -> team-bot[read, flag] -> agent-7[read, flag, credit]. The middle link
-    is the one that matters: an implementation that checked only the root and the leaf would allow
-    this, and it is exactly the shape a real delegation bug takes.
+    alice[read, flag, credit] -> team-bot[read, flag] -> agent-7[read, flag, credit]. The middle
+    link is the one that matters: an implementation that checked only the root and the leaf would
+    allow this, and it is exactly the shape a real delegation bug takes.
     """
     token = lab.authority.mint_delegated(
         chain=[("alice", [READ, FLAG, CREDIT]), ("team-bot", [READ, FLAG])],
@@ -143,8 +141,9 @@ async def test_C_an_approval_that_does_not_match_is_not_an_approval(lab, mutatio
     bound to fewer things than this is an approval that authorises something nobody agreed to.
     """
     token = lab.authority.mint(subject="alice", audience=THIS_SERVER, scopes=[READ, CREDIT])
-    await lab.approve_mutated(mutation, subject="alice", tool="issue_credit", account="ACC-1",
-                              amount=500)
+    await lab.approve_mutated(
+        mutation, subject="alice", tool="issue_credit", account="ACC-1", amount=500
+    )
 
     result = await lab.call_issue_credit(token=token, account="ACC-1", amount=500)
 
@@ -180,7 +179,9 @@ async def test_D_two_concurrent_calls_on_one_approval_produce_exactly_one_effect
     )
     loser = first if first.decision is Decision.DENIED else second
     assert loser.reason == "approval_already_consumed"
-    assert await lab.effect_count() == 1, "one approval authorised more than one irreversible effect"
+    assert await lab.effect_count() == 1, (
+        "one approval authorised more than one irreversible effect"
+    )
 
 
 # ------------------------------------------------------------------------------ E. the happy path
@@ -198,7 +199,9 @@ async def test_E_the_correct_request_succeeds_exactly_once(lab) -> None:
         audience=THIS_SERVER,
         scopes=[READ, CREDIT],
     )
-    approval = await lab.approve(subject="agent-7", tool="issue_credit", account="ACC-1", amount=500)
+    approval = await lab.approve(
+        subject="agent-7", tool="issue_credit", account="ACC-1", amount=500
+    )
 
     result = await lab.call_issue_credit(token=token, account="ACC-1", amount=500)
 
@@ -221,8 +224,9 @@ async def test_E_the_correct_request_succeeds_exactly_once(lab) -> None:
     ],
 )
 async def test_a_flawed_token_never_reaches_the_effect(lab, flaw, reason) -> None:
-    token = lab.authority.mint_flawed(flaw, subject="alice", audience=THIS_SERVER,
-                                      scopes=[READ, CREDIT])
+    token = lab.authority.mint_flawed(
+        flaw, subject="alice", audience=THIS_SERVER, scopes=[READ, CREDIT]
+    )
     await lab.approve(subject="alice", tool="issue_credit", account="ACC-1", amount=500)
 
     result = await lab.call_issue_credit(token=token, account="ACC-1", amount=500)
@@ -239,10 +243,13 @@ async def test_the_naive_verifier_is_the_one_that_fails(lab) -> None:
     if it is run through the identical path. This asserts the direction of the result — the naive
     check lets A and B through — so that the README's matrix cannot drift from the code.
     """
-    wrong_audience = lab.authority.mint(subject="alice", audience=ANOTHER_SERVER,
-                                        scopes=[READ, CREDIT])
+    wrong_audience = lab.authority.mint(
+        subject="alice", audience=ANOTHER_SERVER, scopes=[READ, CREDIT]
+    )
     amplified = lab.authority.mint_delegated(
-        chain=[("alice", [READ, FLAG])], subject="agent-7", audience=THIS_SERVER,
+        chain=[("alice", [READ, FLAG])],
+        subject="agent-7",
+        audience=THIS_SERVER,
         scopes=[READ, FLAG, CREDIT],
     )
 

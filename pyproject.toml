@@ -48,7 +48,9 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF", "ANN", "PTH", "S"]
 ignore = ["ANN401"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["ANN201", "ANN001", "S101", "S105", "S106"]
+# N802: the kill tests are named test_A_/test_B_ after the scenarios ADR-001 lettered. Renaming
+# them to satisfy a naming rule would break the link between the test and the record that fixed it.
+"tests/*" = ["ANN201", "ANN001", "S101", "S105", "S106", "N802"]
 
 [tool.mypy]
 python_version = "3.12"
