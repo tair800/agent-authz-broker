@@ -274,19 +274,27 @@ async def test_the_verifier_reports_the_attenuated_set_not_the_leaf_claim(
     assert CREDIT not in access.scopes, "the leaf's scope claim reached AccessToken.scopes"
 
 
-async def test_the_verifier_reports_a_foreign_audience_rather_than_hiding_it(
+async def test_the_verifier_refuses_a_token_minted_for_another_resource_server(
     verifier: BrokerTokenVerifier, authority: Authority
 ) -> None:
-    """A token minted for another service reports *that* service as its resource.
+    """A token addressed to another service does not authenticate here at all.
 
-    The verifier could quietly report this server's own URL and the token would sail through the
-    SDK's transport check. Reporting the audience the token actually carries is what makes
-    ``validate_token_resource`` worth having — and it is still not the control ADR-001 relies on,
-    which is the audience comparison in ``authz.py``.
+    An earlier version returned it with ``resource`` set truthfully and left the refusal to the
+    SDK's ``validate_token_resource``. That covered every tool which goes on to call
+    ``effects.call_tool`` — and not ``request_approval`` or ``read_approval``, which never reach
+    `authz.py`, so for those two a setting in somebody else's middleware was the only control. A
+    review found the gap. Refusing here covers every tool, and the SDK setting is now the second
+    line rather than the first.
+
+    The token is otherwise perfect, which is the point: this must fail on audience alone.
     """
     elsewhere = authority.mint(subject="alice", audience=ANOTHER_RESOURCE, scopes=[READ, CREDIT])
 
-    access = await verifier.verify_token(elsewhere)
+    assert await verifier.verify_token(elsewhere) is None
 
-    assert access is not None, "this token is authentic; it is simply not addressed to us"
-    assert access.resource == ANOTHER_RESOURCE
+    # The same token, same signature, same scopes, addressed to us: accepted. Without this the test
+    # above would also pass against a verifier that refused everything.
+    addressed = authority.mint(subject="alice", audience=RESOURCE, scopes=[READ, CREDIT])
+    accepted = await verifier.verify_token(addressed)
+    assert accepted is not None
+    assert accepted.resource == RESOURCE

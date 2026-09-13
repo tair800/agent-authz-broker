@@ -205,19 +205,27 @@ class BrokerTokenVerifier:
             token: The raw bearer string from the ``Authorization`` header.
 
         Returns:
-            An ``AccessToken`` carrying the attenuated scopes and the token's real audience, or
-            ``None`` when the signature, issuer, expiry or delegation chain does not check out.
+            An ``AccessToken`` carrying the attenuated scopes, or ``None`` when the signature,
+            issuer, expiry, delegation chain **or audience** does not check out.
+
+        **The audience is refused here, not only reported here.** An earlier version set
+        ``resource`` truthfully and left the decision to the SDK's ``validate_token_resource``. That
+        is real enforcement, but it covered only the tools that go on to call
+        ``effects.call_tool``: ``request_approval`` and ``read_approval`` never reach `authz.py`, so
+        for them a setting in somebody else's middleware was the *only* thing standing between a
+        token minted for another service and this server's approval state. A review found it. The
+        check now runs before any tool does, and ``validate_token_resource`` stays on as the second
+        line rather than the first.
         """
         claims = verify_token(token, jwks_by_issuer=self._jwks)
         if isinstance(claims, str):
             return None
 
+        if self._audience not in claims.audience:
+            return None
+
         granted = effective_scopes(claims, attenuate=True)
-        resource: str | None
-        if self._audience in claims.audience:
-            resource = self._audience
-        else:
-            resource = claims.audience[0] if claims.audience else None
+        resource = self._audience
 
         return AccessToken(
             token=token,

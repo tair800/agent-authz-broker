@@ -1,0 +1,116 @@
+{
+  "generated_at": "2026-09-13T10:14:04+00:00",
+  "resource_server_url": "https://broker.example/mcp",
+  "scenarios": [
+    {
+      "id": "valid_request",
+      "title": "Correct audience, attenuated scope, matching approval",
+      "description": "The positive path. A suite that only proves refusals has shown a server that denies everything, which is easy.",
+      "is_attack": false,
+      "expected_effects": 1,
+      "naive": {
+        "decision": "allowed",
+        "reason": null,
+        "effects": 1
+      },
+      "hardened": {
+        "decision": "allowed",
+        "reason": null,
+        "effects": 1
+      }
+    },
+    {
+      "id": "wrong_audience",
+      "title": "Valid token, minted for another resource server",
+      "description": "Real signature, known issuer, unexpired, sufficient scope, approval on file. The only defect is who the token was minted for.",
+      "is_attack": true,
+      "expected_effects": 0,
+      "naive": {
+        "decision": "allowed",
+        "reason": null,
+        "effects": 1
+      },
+      "hardened": {
+        "decision": "denied",
+        "reason": "audience_mismatch",
+        "effects": 0
+      }
+    },
+    {
+      "id": "scope_amplification",
+      "title": "Delegated token claims a scope its delegator never had",
+      "description": "alice holds read and flag. The leaf claims read, flag and credit:issue. Effective authority is the intersection down the chain, not the leaf's claim.",
+      "is_attack": true,
+      "expected_effects": 0,
+      "naive": {
+        "decision": "allowed",
+        "reason": null,
+        "effects": 1
+      },
+      "hardened": {
+        "decision": "denied",
+        "reason": "insufficient_effective_scope",
+        "effects": 0
+      }
+    },
+    {
+      "id": "no_approval",
+      "title": "Irreversible tool with no recorded human approval",
+      "description": "Everything is correct except that no human ever approved this act.",
+      "is_attack": true,
+      "expected_effects": 0,
+      "naive": {
+        "decision": "denied",
+        "reason": "approval_required",
+        "effects": 0
+      },
+      "hardened": {
+        "decision": "denied",
+        "reason": "approval_required",
+        "effects": 0
+      }
+    },
+    {
+      "id": "expired_approval",
+      "title": "An approval that has expired",
+      "description": "A human approved this, two hours ago. An approval is not good forever.",
+      "is_attack": true,
+      "expected_effects": 0,
+      "naive": {
+        "decision": "denied",
+        "reason": "approval_expired",
+        "effects": 0
+      },
+      "hardened": {
+        "decision": "denied",
+        "reason": "approval_expired",
+        "effects": 0
+      }
+    },
+    {
+      "id": "approval_replay",
+      "title": "One approval, two calls",
+      "description": "The same valid token and the same valid approval, presented twice. The approval is consumed by a conditional UPDATE, so the second call finds nothing to spend.",
+      "is_attack": true,
+      "expected_effects": 1,
+      "naive": {
+        "decision": "denied",
+        "reason": "approval_required",
+        "effects": 1
+      },
+      "hardened": {
+        "decision": "denied",
+        "reason": "approval_required",
+        "effects": 1
+      }
+    }
+  ],
+  "totals": {
+    "naive_effects": 4,
+    "hardened_effects": 2,
+    "attacks": 5,
+    "attacks_permitted_by_naive": 2,
+    "attacks_permitted_by_hardened": 0
+  },
+  "note": "Both policies share one approval layer, so they differ only where the difference is a token check: audience and delegation attenuation. Scenarios that turn on approval are refused under both, and this table says so rather than overstating the baseline. In the replay row the reason differs from the concurrent case by design: a sequential second call finds no unconsumed approval at all (approval_required), while two genuinely concurrent calls race and the loser reports approval_already_consumed. Both fail closed."
+}

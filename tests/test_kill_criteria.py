@@ -258,9 +258,15 @@ async def test_the_naive_verifier_is_the_one_that_fails(lab: Lab) -> None:
     )
     assert authorize(lab.naive, amplified_claims, tool="issue_credit").decision is Decision.ALLOWED
 
-    assert authorize(
-        lab.hardened, wrong_audience_claims, tool="issue_credit", audience=THIS_SERVER
-    ).decision is Decision.DENIED
-    assert authorize(
-        lab.hardened, amplified_claims, tool="issue_credit", audience=THIS_SERVER
-    ).decision is Decision.DENIED
+    assert (
+        authorize(
+            lab.hardened, wrong_audience_claims, tool="issue_credit", audience=THIS_SERVER
+        ).decision
+        is Decision.DENIED
+    )
+    assert (
+        authorize(
+            lab.hardened, amplified_claims, tool="issue_credit", audience=THIS_SERVER
+        ).decision
+        is Decision.DENIED
+    )

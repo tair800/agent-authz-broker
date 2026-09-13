@@ -85,8 +85,8 @@ class Lab:
     ) -> ApprovalHandle:
         """Record an approval that is wrong in exactly one of the ways ADR-001 binds against.
 
-        Each mutation removes exactly one binding, so a failure names which binding stopped mattering
-        rather than leaving a reader to guess.
+        Each mutation removes exactly one binding, so a failure names which binding stopped
+        mattering rather than leaving a reader to guess.
         """
         now = dt.datetime.now(tz=dt.UTC)
         fields: dict[str, Any] = {
