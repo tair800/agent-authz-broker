@@ -266,6 +266,15 @@ assemble the list themselves.
   repository including the workflow that defines them.
 - `make db-up` brings `docker-compose.yml` up to a healthy PostgreSQL; every other target expands
   to the command it documents.
+- **The approval gate, driven over HTTP against a running server.** `POST /api/v1/approvals`
+  answered **401** with no credential, **401** with a valid agent bearer token minted by the test
+  authority, and **201** with `AAB_APPROVER_TOKEN`. The approval that 201 created was then spent by
+  `issue_credit` through a real MCP client — so the gate closes the hole without closing the demo.
+- **Refusals at the transport, audited.** With the server running, `GET /api/v1/audit` went from 1
+  row to 3 after replaying a token minted for another resource server and then a garbage bearer
+  string over real MCP: `audience_mismatch` (subject `agent-7`) and `token_malformed` (no subject),
+  both with `tool` recorded as `-` because the request was never routed. A reviewer measured **zero**
+  rows for both of those before the fix.
 
 **Verified by deploying**, after the above was written:
 
