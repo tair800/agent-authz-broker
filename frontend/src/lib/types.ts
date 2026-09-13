@@ -25,6 +25,16 @@ export interface Scenario {
   id: string;
   title: string;
   description: string;
+  /**
+   * What ADR-001 requires of the hardened server on this row — usually zero, but the replay
+   * scenario makes two calls and exactly one effect is the correct outcome.
+   *
+   * Carried onto the screen rather than left in the artifact so that prose about the hardened
+   * column can be computed from the measurement instead of written beside it. The sentence under
+   * this table once said the hardened server permitted *one* effect while the total rendered seven
+   * lines above it said two; it had been true when it was typed.
+   */
+  expected_effects: number;
   /** The predeclared baseline: signature and expiry only. */
   naive: ScenarioOutcome;
   hardened: ScenarioOutcome;

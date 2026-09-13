@@ -1,0 +1,214 @@
+"""Replant the five breaches of ADR-003 and prove the suite still catches each one.
+
+A suite that has never failed is not evidence that a system is safe; it is evidence that nothing
+has tested it. Project 3 in this portfolio shipped a guard that forbade importing a module which
+did not exist — green on every run, protecting nothing, until a reviewer planted the breach it was
+supposed to stop.
+
+ADR-003 recorded that each control here was removed by hand and the right test went red. A reviewer
+was right to point out that this left the claim exactly as checkable as the guard it was warning
+about: a table in a document. So the removals live here instead. Each one edits a source file,
+runs only the tests ADR-003 names for it, and requires them to **fail**. A control whose removal
+changes nothing is reported as a hole, and the script exits non-zero.
+
+    make breaches      # PostgreSQL must be up: make db-up
+
+Every file is restored in a ``finally``, and the script refuses to start against a dirty working
+tree so that a crash mid-run can never be mistaken for source you wrote. If it is ever killed
+between the edit and the restore, ``git checkout -- src/`` puts it back.
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclasses.dataclass(frozen=True)
+class Breach:
+    """One control removed, and the tests that must notice."""
+
+    number: int
+    control: str
+    file: str
+    before: str
+    after: str
+    tests: tuple[str, ...]
+    """Node ids. Narrow on purpose: a breach that fails the whole suite proves less than one that
+    fails the specific test ADR-003 claims is watching for it."""
+
+
+AUTHZ = "src/agent_authz_broker/authz.py"
+APPROVALS = "src/agent_authz_broker/approvals.py"
+MCP = "src/agent_authz_broker/mcp_server.py"
+KILL = "tests/test_kill_criteria.py"
+SURFACE = "tests/test_mcp_surface.py"
+
+BREACHES: tuple[Breach, ...] = (
+    Breach(
+        number=1,
+        control="HARDENED checks the token's audience",
+        file=AUTHZ,
+        before='HARDENED = Policy(name="hardened", check_audience=True, attenuate_chain=True)',
+        after='HARDENED = Policy(name="hardened", check_audience=False, attenuate_chain=True)',
+        tests=(
+            f"{KILL}::test_A_valid_token_for_another_resource_server_is_refused",
+            f"{SURFACE}::test_the_verifier_refuses_a_token_minted_for_another_resource_server",
+        ),
+    ),
+    Breach(
+        number=2,
+        control="effective_scopes intersects the whole chain",
+        file=AUTHZ,
+        before="    if not attenuate:\n        return claims.scopes\n    granted = claims.scopes",
+        after="    if True:\n        return claims.scopes\n    granted = claims.scopes",
+        tests=(
+            f"{KILL}::test_B_delegated_token_cannot_gain_a_scope_an_ancestor_lacked",
+            f"{KILL}::test_B_multi_hop_attenuation_takes_the_intersection_of_every_link",
+        ),
+    ),
+    Breach(
+        number=3,
+        control="consume_approval spends an approval at most once",
+        file=APPROVALS,
+        before=(
+            "        .where(Approval.approval_id == approval_id, Approval.consumed_at.is_(None))"
+        ),
+        after="        .where(Approval.approval_id == approval_id)",
+        tests=(f"{KILL}::test_D_two_concurrent_calls_on_one_approval_produce_exactly_one_effect",),
+    ),
+    Breach(
+        number=4,
+        control="the approval lookup is bound to the account",
+        file=APPROVALS,
+        before="                Approval.account == account,\n",
+        after="",
+        tests=(
+            f"{KILL}::test_C_an_approval_that_does_not_match_is_not_an_approval[other_account]",
+        ),
+    ),
+    Breach(
+        number=5,
+        control="the admin reset is not an MCP tool",
+        file=MCP,
+        before='    @server.tool(title="Ping")',
+        after=(
+            '    @server.tool(title="Admin reset")\n'
+            "    def admin_reset() -> str:\n"
+            '        """Planted by scripts/plant_breaches.py. Never commit this."""\n'
+            '        return "reset"\n'
+            "\n"
+            '    @server.tool(title="Ping")'
+        ),
+        tests=(
+            f"{SURFACE}::test_the_advertised_tool_list_is_exactly_the_six",
+            f"{SURFACE}::test_no_reset_shaped_tool_is_reachable_over_mcp",
+        ),
+    ),
+)
+
+
+GIT = shutil.which("git") or "git"
+
+
+def _dirty() -> list[str]:
+    # The suppressions below are justified once, here: both argv lists are literals defined in
+    # this file plus the node ids in BREACHES. Nothing reaches them from an argument, an
+    # environment variable or a file, and no shell is involved.
+    result = subprocess.run(  # noqa: S603
+        [GIT, "status", "--porcelain", "--", "src", "tests"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def _pytest(tests: tuple[str, ...]) -> int:
+    return subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:randomly", *tests],
+        cwd=ROOT,
+        check=False,
+    ).returncode
+
+
+def _run(breach: Breach) -> bool:
+    """Plant one breach, run its tests, restore. True if the tests caught it."""
+    path = ROOT / breach.file
+    original = path.read_text(encoding="utf-8")
+    occurrences = original.count(breach.before)
+    if occurrences != 1:
+        print(
+            f"  breach {breach.number}: cannot plant — its anchor appears {occurrences} times in "
+            f"{breach.file}. The source moved; fix this script rather than the count.",
+        )
+        return False
+
+    try:
+        path.write_text(original.replace(breach.before, breach.after), encoding="utf-8")
+        code = _pytest(breach.tests)
+    finally:
+        path.write_text(original, encoding="utf-8")
+
+    caught = code != 0
+    verdict = "CAUGHT (its tests failed, as required)" if caught else "NOT CAUGHT"
+    print(f"  breach {breach.number}: {verdict}")
+    return caught
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--only", type=int, default=None, help="plant just this breach number")
+    args = parser.parse_args()
+
+    dirty = _dirty()
+    if dirty:
+        print("Refusing to run against a dirty tree — commit or stash first:")
+        for line in dirty:
+            print(f"  {line}")
+        return 2
+
+    selected = [b for b in BREACHES if args.only is None or b.number == args.only]
+    if not selected:
+        print(f"no breach numbered {args.only}")
+        return 2
+
+    holes: list[Breach] = []
+    for breach in selected:
+        print(f"\nbreach {breach.number}: removing — {breach.control}")
+        if not _run(breach):
+            holes.append(breach)
+
+    after = _dirty()
+    if after:
+        print("\nA file was not restored. Run: git checkout -- src/ tests/")
+        for line in after:
+            print(f"  {line}")
+        return 2
+
+    print()
+    if holes:
+        for breach in holes:
+            print(
+                f"HOLE: removing '{breach.control}' changed nothing. "
+                f"{'; '.join(breach.tests)} still passed."
+            )
+        print(f"{len(holes)} of {len(selected)} controls are not load-bearing.")
+        return 1
+
+    print(
+        f"{len(selected)} of {len(selected)} controls are load-bearing: "
+        "each removal was caught by the tests ADR-003 names."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

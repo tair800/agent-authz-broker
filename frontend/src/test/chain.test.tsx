@@ -29,11 +29,12 @@ describe("the delegation view", () => {
     expect(attenuated).not.toBeNull();
     expect(scopeChips(attenuated as HTMLElement, "attenuated")).toEqual(["credit:issue"]);
 
+    // Compared as a set: the artifact sorts scopes and the screen renders them in the order it is
+    // given, so the order is the measurement's business rather than this assertion's.
     const effective = document.querySelector<HTMLElement>('[data-field="effective"]');
-    expect(scopeChips(effective as HTMLElement, "effective")).toEqual([
-      "account:read",
-      "account:flag",
-    ]);
+    expect(new Set(scopeChips(effective as HTMLElement, "effective"))).toEqual(
+      new Set(["account:read", "account:flag"]),
+    );
     expect(scopeChips(effective as HTMLElement, "effective")).not.toContain("credit:issue");
   });
 

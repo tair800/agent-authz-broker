@@ -42,7 +42,9 @@ describe("a payload that is not the agreed shape", () => {
     const broken = {
       generated_at: "now",
       resource_server_url: "https://broker.example/mcp",
-      scenarios: [{ id: "x", title: "t", description: "d", naive: {}, hardened: {} }],
+      scenarios: [
+        { id: "x", title: "t", description: "d", expected_effects: 0, naive: {}, hardened: {} },
+      ],
       totals: { naive_effects: 0, hardened_effects: 0 },
     };
 

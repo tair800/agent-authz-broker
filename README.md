@@ -110,7 +110,10 @@ Breach 3 is the informative one: removing the application-level guard did not pr
 answer, it produced a constraint violation. The database refused the second effect on its own, which
 is the only reason it is honest to call that constraint a backstop rather than decoration.
 
-All controls restored; **32 tests green**. [ADR-003](DECISIONS.md) has the detail.
+**Re-run it yourself — the table is a script.** `make breaches` replants all five against your
+checkout, requires the named tests to fail each time, restores every file, and exits non-zero if
+any control turns out not to be load-bearing. All controls restored; **32 tests green**.
+[ADR-003](DECISIONS.md) has the detail.
 
 ---
 

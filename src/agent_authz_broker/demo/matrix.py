@@ -10,6 +10,14 @@ relearning: a matrix somebody typed is a claim, and a matrix a run wrote is evid
 
 Every effect count here is ``SELECT count(*) FROM irreversible_effect`` after a clean database, so a
 scenario cannot borrow an effect from the one before it.
+
+**The other three console screens are written from this run too**, and for the same reason. They
+were hand-authored once, and the hand-authored versions outlived the correction above: the audit
+fixture still showed the naive verifier minting six effects, and the chain fixture still named
+*alice* as the subject of tokens the scenarios mint for *agent-7*. Nothing propagated the fix,
+because nothing had to. So the audit trail is now the ``audit_event`` rows this run wrote, the
+approvals are the ``approval`` rows it left behind, and each chain is decoded from the token that
+was actually presented — not a second description of it kept somewhere else.
 """
 
 from __future__ import annotations
@@ -23,10 +31,12 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from agent_authz_broker.approvals import create_approval
-from agent_authz_broker.authz import HARDENED, NAIVE, Policy
+from agent_authz_broker.authz import HARDENED, NAIVE, Policy, effective_scopes
 from agent_authz_broker.db.models import Approval, AuditEvent, IrreversibleEffect
+from agent_authz_broker.domain import TOOL_SCOPES, TokenClaims
 from agent_authz_broker.effects import call_tool
 from agent_authz_broker.testauthority import TestAuthority
+from agent_authz_broker.tokens import verify_token
 
 __all__ = ["SCENARIOS", "Scenario", "build_matrix"]
 
@@ -189,6 +199,90 @@ async def _effects(engine: AsyncEngine) -> int:
         return int(total.scalar_one())
 
 
+async def _audit(engine: AsyncEngine) -> list[dict[str, Any]]:
+    """The audit rows this run wrote, in the shape ``GET /api/v1/audit`` serves.
+
+    Read before the next reset, because the next reset deletes them. The shape is duplicated from
+    the endpoint deliberately: the console must render the fixture and the live read identically,
+    and a divergence here would show up as a parse failure rather than as a quiet difference.
+    """
+    async with AsyncSession(engine) as session:
+        rows = (await session.execute(select(AuditEvent).order_by(AuditEvent.at))).scalars()
+        return [
+            {
+                "audit_id": row.audit_id,
+                "at": row.at.isoformat(),
+                "subject": row.subject,
+                "tool": row.tool,
+                "policy": row.policy,
+                "decision": row.decision,
+                "reason": row.reason,
+                "required_scope": row.required_scope,
+                "effective_scopes": row.effective_scopes.split() if row.effective_scopes else [],
+                "approval_id": row.approval_id,
+                "effect_id": row.effect_id,
+            }
+            for row in rows
+        ]
+
+
+async def _approvals(engine: AsyncEngine, *, now: dt.datetime) -> list[dict[str, Any]]:
+    """The approval rows this run left behind, in the shape ``GET /api/v1/approvals`` serves."""
+    async with AsyncSession(engine) as session:
+        rows = (await session.execute(select(Approval).order_by(Approval.created_at))).scalars()
+        return [
+            {
+                "approval_id": row.approval_id,
+                "subject": row.subject,
+                "tool": row.tool,
+                "account": row.account,
+                "amount": row.amount,
+                "approved_by": row.approved_by,
+                "expires_at": row.expires_at.isoformat(),
+                "consumed_at": row.consumed_at.isoformat() if row.consumed_at else None,
+                "state": (
+                    "consumed"
+                    if row.consumed_at
+                    else ("expired" if row.expires_at <= now else "pending")
+                ),
+            }
+            for row in rows
+        ]
+
+
+def _chain_of(scenario: Scenario, token: str, *, authority: TestAuthority) -> dict[str, Any]:
+    """The delegation chain **in the token that was presented**, and where authority was lost.
+
+    Decoded from the bearer string with the same verifier the server uses, then attenuated with the
+    same :func:`effective_scopes`. There is no separate description of the chain anywhere: a
+    scenario that changed who it delegates from would change this artifact on the next run, which
+    is exactly what the hand-written fixture could not do.
+    """
+    claims = verify_token(token, jwks_by_issuer={authority.issuer: authority.jwks()})
+    if not isinstance(claims, TokenClaims):
+        raise AssertionError(f"{scenario.id}: its own token did not verify ({claims})")
+
+    links: list[dict[str, Any]] = [
+        {
+            "subject": link.subject,
+            "scopes": sorted(link.scopes),
+            "role": "root" if index == 0 else "intermediate",
+        }
+        for index, link in enumerate(claims.chain)
+    ]
+    links.append({"subject": claims.subject, "scopes": sorted(claims.scopes), "role": "leaf"})
+
+    effective = effective_scopes(claims, attenuate=True)
+    return {
+        "scenario": scenario.id,
+        "title": scenario.title,
+        "links": links,
+        "effective_scopes": sorted(effective),
+        "required_scope": TOOL_SCOPES["issue_credit"],
+        "attenuated_away": sorted(claims.scopes - effective),
+    }
+
+
 async def _run(
     engine: AsyncEngine,
     scenario: Scenario,
@@ -197,7 +291,12 @@ async def _run(
     authority: TestAuthority,
     audience: str,
 ) -> dict[str, Any]:
-    """One scenario, one policy, from a clean database."""
+    """One scenario, one policy, from a clean database.
+
+    Returns the row the matrix renders **and** the database state the run produced, because the
+    state is gone the moment the next scenario resets. ``token`` comes back so the caller can decode
+    the chain from the credential that was actually presented.
+    """
     await _reset(engine)
     token = await scenario.setup(engine, authority, audience)
 
@@ -216,10 +315,15 @@ async def _run(
         "decision": str(last.decision),
         "reason": last.reason,
         "effects": await _effects(engine),
+        "_token": token,
+        "_audit": await _audit(engine),
+        "_approvals": await _approvals(engine, now=dt.datetime.now(tz=dt.UTC)),
     }
 
 
-async def build_matrix(engine: AsyncEngine, *, audience: str, generated_at: str) -> dict[str, Any]:
+async def build_matrix(
+    engine: AsyncEngine, *, audience: str, generated_at: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Measure every scenario under both policies.
 
     Args:
@@ -229,10 +333,17 @@ async def build_matrix(engine: AsyncEngine, *, audience: str, generated_at: str)
         generated_at: Stamped by the caller, so this stays a pure function of the scenarios.
 
     Returns:
-        The artifact the console and the README render.
+        ``(matrix, console)``. The first is the artifact the README and the matrix screen render.
+        The second is what the other three screens render — the audit rows this run wrote, the
+        approvals it left behind, and each scenario's chain decoded from its own token. They are
+        returned together because they are one measurement: a console assembled from a matrix
+        measured here and screens written by hand somewhere else is how the two came to disagree.
     """
     authority = TestAuthority()
     rows: list[dict[str, Any]] = []
+    trail: list[dict[str, Any]] = []
+    approvals: list[dict[str, Any]] = []
+    chains: dict[str, Any] = {}
     naive_effects = 0
     hardened_effects = 0
 
@@ -241,6 +352,19 @@ async def build_matrix(engine: AsyncEngine, *, audience: str, generated_at: str)
         hardened = await _run(engine, scenario, HARDENED, authority=authority, audience=audience)
         naive_effects += int(naive["effects"])
         hardened_effects += int(hardened["effects"])
+
+        chains[scenario.id] = _chain_of(scenario, hardened.pop("_token"), authority=authority)
+        naive.pop("_token")
+        trail.extend(naive.pop("_audit"))
+        trail.extend(hardened.pop("_audit"))
+        # The approvals screen shows one store, not two interleaved ones, so it shows the hardened
+        # server's. Under the naive policy the approvals for scenarios A and B are consumed rather
+        # than left pending -- which is the breach, and the audit trail above carries both policies
+        # and says so. `frontend/fixtures/README.md` records this choice rather than leaving a
+        # reader to infer it from a table with no column to tell the two stores apart.
+        naive.pop("_approvals")
+        approvals.extend(hardened.pop("_approvals"))
+
         rows.append(
             {
                 "id": scenario.id,
@@ -255,7 +379,7 @@ async def build_matrix(engine: AsyncEngine, *, audience: str, generated_at: str)
 
     await _reset(engine)
     attacks = [row for row in rows if row["is_attack"]]
-    return {
+    matrix = {
         "generated_at": generated_at,
         "resource_server_url": audience,
         "scenarios": rows,
@@ -283,6 +407,16 @@ async def build_matrix(engine: AsyncEngine, *, audience: str, generated_at: str)
             "fail closed."
         ),
     }
+    # Newest first, matching `GET /api/v1/audit`'s ordering, so the same screen reads the same way
+    # whichever of the two it is attached to.
+    trail.reverse()
+    console = {
+        "generated_at": generated_at,
+        "audit": trail,
+        "approvals": approvals,
+        "chains": chains,
+    }
+    return matrix, console
 
 
 def _now() -> str:

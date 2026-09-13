@@ -209,6 +209,20 @@ removal changes nothing is not a control.
 
 Every control was restored and the full suite is green: **32 tests**.
 
+**The removals are a script, not a memory of an afternoon.** A reviewer pointed out that this table
+was exactly as checkable as the Project 3 guard it opens by warning about — a claim in a document.
+So `scripts/plant_breaches.py` holds all five. It refuses to start against a dirty tree, edits one
+source file, runs **only** the tests named in the table above, requires them to fail, and restores
+the file in a `finally`:
+
+```
+make breaches
+```
+
+A control whose removal changes nothing is reported as a hole and the script exits non-zero. That
+is the difference between this section being a result and being a paragraph: re-run it against any
+later commit and it either still holds or it tells you which control stopped being load-bearing.
+
 **Breach 3 is the most informative of the five.** Removing the conditional from the `UPDATE` did not
 produce a wrong answer — it produced a `psycopg`/asyncpg `IntegrityError` from the UNIQUE constraint
 on `irreversible_effect.approval_id`. That is the backstop doing its job: even with the application
@@ -217,6 +231,7 @@ mechanisms are genuinely independent, which is the only reason it is honest to c
 backstop rather than a comment.
 
 **What this review does not establish.** It shows that each control is load-bearing and that the
-tests detect its removal. It does not enumerate every attack — no such review does. The threat model
+tests detect its removal. It does not enumerate every attack — no such review does, and five
+breaches chosen by the author are five the author thought of. The threat model
 in `docs/threat-model.md` states what is out of scope, and the largest item is unchanged: a stolen,
 still-valid token used within its attenuated scope for reversible reads is not detected here.

@@ -106,6 +106,7 @@ function parseScenario(raw: unknown, at: string): Scenario {
     id: text(s.id, `${at}.id`),
     title: text(s.title, `${at}.title`),
     description: text(s.description, `${at}.description`),
+    expected_effects: count(s.expected_effects, `${at}.expected_effects`),
     naive: parseOutcome(s.naive, `${at}.naive`),
     hardened: parseOutcome(s.hardened, `${at}.hardened`),
   };

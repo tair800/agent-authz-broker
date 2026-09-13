@@ -33,14 +33,25 @@ const STAGE_OF_REASON: Readonly<Record<string, Stage>> = {
 };
 
 /**
- * The stages each policy actually performs, from ADR-001.
+ * The stages each policy actually performs.
+ *
+ * **The approval stage is performed under both.** Approval is a layer below the two policies, not
+ * part of either, so the only stage the naive baseline skips is `audience` — and `scope`, which it
+ * does perform, it performs on the leaf's claim rather than on the attenuated set.
+ *
+ * This map said `["token", "scope"]` for the naive baseline, copied from ADR-001's *prediction*
+ * that the naive verifier would also fail the no-approval scenario. The measurement retracted that
+ * prediction, and nothing here changed, because the hand-written audit fixture happened to contain
+ * no naive row that was refused at the approval stage. When the fixture was replaced by the
+ * measurement, four such rows appeared at once — each rendering `approval` as *this verifier does
+ * not perform this check* directly beside the outcome `denied · approval_required`.
  *
  * A policy this console has not been told about gets every stage rendered neutrally rather than
  * guessed at; inventing a claim about an unknown verifier is the one thing this screen must not do.
  */
 const PERFORMED: Readonly<Record<string, ReadonlySet<Stage>>> = {
   hardened: new Set(STAGES),
-  naive: new Set<Stage>(["token", "scope"]),
+  naive: new Set<Stage>(["token", "scope", "approval"]),
 };
 
 type Mark = "passed" | "refused" | "unreached" | "unchecked" | "unknown";

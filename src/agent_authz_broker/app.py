@@ -36,7 +36,6 @@ from agent_authz_broker.approvals import create_approval, list_approvals
 from agent_authz_broker.config import Settings
 from agent_authz_broker.db.engine import build_engine
 from agent_authz_broker.db.models import Approval, AuditEvent, IrreversibleEffect
-from agent_authz_broker.demo.matrix import SCENARIOS
 from agent_authz_broker.mcp_server import create_server
 from agent_authz_broker.testauthority import TestAuthority
 
@@ -44,6 +43,7 @@ __all__ = ["create_app"]
 
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACT = ROOT / "artifacts" / "matrix.json"
+CHAINS = ROOT / "artifacts" / "chains.json"
 
 
 class GrantApproval(BaseModel):
@@ -159,40 +159,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def chain(scenario_id: str) -> dict[str, Any]:
         """The delegation chain for one scenario, and where authority was lost.
 
-        Computed from the scenario definitions rather than stored, so it cannot disagree with the
-        tokens the matrix run actually minted.
+        Served from `artifacts/chains.json`, which the measurement run decodes out of the token each
+        scenario actually minted. This route used to hold its own copy of the chains, written by
+        hand from reading the scenarios. It was wrong: it named *alice* as the subject of the four
+        tokens minted directly for *agent-7*, and nothing could have told anyone, because the copy
+        was the only thing the screen consulted. The copy is gone.
         """
-        scenario = next((s for s in SCENARIOS if s.id == scenario_id), None)
-        if scenario is None:
+        if not CHAINS.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"status": "no_chains", "hint": "run: python -m agent_authz_broker.demo"},
+            )
+        loaded: dict[str, Any] = json.loads(CHAINS.read_text(encoding="utf-8"))
+        found = loaded.get(scenario_id)
+        if not isinstance(found, dict):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=scenario_id)
-
-        read, flag, credit = "account:read", "account:flag", "credit:issue"
-        links: list[dict[str, Any]]
-        if scenario_id == "scope_amplification":
-            links = [
-                {"subject": "alice", "scopes": [read, flag], "role": "root"},
-                {"subject": "agent-7", "scopes": [read, flag, credit], "role": "leaf"},
-            ]
-        elif scenario_id in {"valid_request", "wrong_audience"}:
-            links = [
-                {"subject": "alice", "scopes": [read, flag, credit], "role": "root"},
-                {"subject": "agent-7", "scopes": [read, credit], "role": "leaf"},
-            ]
-        else:
-            links = [{"subject": "agent-7", "scopes": [read, credit], "role": "leaf"}]
-
-        effective = set(links[-1]["scopes"])
-        for link in links[:-1]:
-            effective &= set(link["scopes"])
-        claimed = set(links[-1]["scopes"])
-        return {
-            "scenario": scenario_id,
-            "title": scenario.title,
-            "links": links,
-            "effective_scopes": sorted(effective),
-            "required_scope": credit,
-            "attenuated_away": sorted(claimed - effective),
-        }
+        return found
 
     @app.get("/api/v1/approvals")
     async def approvals() -> list[dict[str, Any]]:

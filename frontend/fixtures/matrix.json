@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-13T10:14:04+00:00",
-  "resource_server_url": "https://broker.example/mcp",
+  "generated_at": "2026-09-13T11:20:01+00:00",
+  "resource_server_url": "http://localhost:8000/mcp",
   "scenarios": [
     {
       "id": "valid_request",

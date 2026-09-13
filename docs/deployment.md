@@ -2,8 +2,11 @@
 
 How this runs, what it costs, and which properties are true only because of the plan it runs on.
 
-**Nothing here claims a deployment exists.** A live URL appears in the README when there is one and
-it has answered a request, and not before.
+**The console is deployed; the resource server is not.** `https://agent-authz-broker.vercel.app`
+answers, and renders the committed artifacts because `BROKER_API_BASE_URL` is unset there. Render
+and Neon have not been provisioned, so `https://agent-authz-broker.onrender.com/healthz` returns
+404 and no MCP client has connected to a deployed instance. Section 11 says exactly which of the
+claims below have been run and which have not.
 
 ---
 
@@ -259,8 +262,20 @@ assemble the list themselves.
 - `make db-up` brings `docker-compose.yml` up to a healthy PostgreSQL; every other target expands
   to the command it documents.
 
-**Not verified:** nothing here has been deployed to Render, Neon or Vercel, and no MCP client has
-connected to a deployed instance. The ~50 s cold start is the platform's documented behaviour, not
-a measurement of this service. The image build was exercised with a placeholder `alembic.ini`,
-because the real migration environment had not landed when this was written. Each of those closes
-when the deployment happens, and this section is rewritten then rather than assumed away.
+**Verified by deploying**, after the above was written:
+
+- The console is live on Vercel Hobby at `https://agent-authz-broker.vercel.app`. Every route
+  answers 200, and each one states on its face that it is rendering committed artifacts rather than
+  a live broker, because `BROKER_API_BASE_URL` is unset in that project.
+
+**Not verified:** the resource server has **not** been deployed. Render and Neon were never
+provisioned — `https://agent-authz-broker.onrender.com/healthz` returns 404 — so no MCP client has
+connected to a deployed instance, the entrypoint's migrate-then-seed-then-serve sequence has run
+only against local PostgreSQL, and the ~50 s cold start is the platform's documented behaviour
+rather than a measurement of this service. The image build was exercised with a placeholder
+`alembic.ini`, because the real migration environment had not landed when this was written.
+
+This paragraph previously read *"nothing here has been deployed to Render, Neon or Vercel"* while
+the README linked the live console. It was written before the console went up and nothing brought
+it forward. It is corrected in place rather than deleted, because a repository whose whole subject
+is refusing to take a claim on trust should show where it failed to check its own.

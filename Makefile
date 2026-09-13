@@ -13,7 +13,7 @@ PG_PORT := 15434
 DSN := postgresql://aab:aab_local_dev@localhost:$(PG_PORT)/aab
 AUD := http://localhost:8000/mcp
 
-.PHONY: help install fmt lint types test gate db-up migrate seed killtest api clean
+.PHONY: help install fmt lint types test gate db-up migrate seed killtest breaches matrix api clean
 
 help: ## List the targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -55,6 +55,12 @@ seed: migrate ## Seed the synthetic accounts and the ADR-001 scenarios. Never de
 killtest: migrate ## THE ADVERSARIAL SUITE. Every count comes from irreversible_effect.
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) \
 	  uv run pytest -m integration
+
+breaches: migrate ## Replant ADR-003's five breaches and require the suite to catch each one
+	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) 	  uv run python scripts/plant_breaches.py
+
+matrix: migrate ## Measure the security matrix and write every console artifact
+	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) 	  uv run python -m agent_authz_broker.demo
 
 api: seed ## Serve the MCP server and the console API against the seeded database
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) \

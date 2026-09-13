@@ -13,6 +13,57 @@ import { Scope } from "@/components/primitives";
 import type { Matrix, Scenario, ScenarioOutcome } from "@/lib/types";
 import { REASON_BLURB } from "@/lib/types";
 
+/**
+ * What the hardened server let through, named from the rows rather than asserted beside them.
+ *
+ * This paragraph used to be a sentence: *"the one effect the hardened server permitted is the
+ * valid_request row"*. It was true of an earlier measurement and false of this one, which counts
+ * two — the second is the legitimate first call of the replay pair, and the table said so seven
+ * lines above while the prose said otherwise. Nothing could have caught that, because the sentence
+ * was not reading anything. This reads the same scenarios the table does.
+ */
+function PermittedByHardened({ matrix }: { matrix: Matrix }) {
+  const permitted = matrix.scenarios.filter((s) => s.hardened.effects > 0);
+  const excess = permitted.filter((s) => s.hardened.effects > s.expected_effects);
+
+  if (permitted.length === 0) {
+    return (
+      <p className="text-ink-dim">
+        The hardened server permitted no irreversible effect on any row, including the one that was
+        supposed to succeed — which is a server that refuses everything, not a server that is right.
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-ink-dim">
+      The {permitted.length === 1 ? "one effect" : `${permitted.length} effects`} the hardened
+      server permitted{" "}
+      {excess.length === 0 ? (
+        <>
+          were each required by the scenario that produced{" "}
+          {permitted.length === 1 ? "it" : "them"}
+        </>
+      ) : (
+        <span className="text-breach">
+          include {excess.length} that ADR-001 does not allow, which is a failed kill test
+        </span>
+      )}
+      :{" "}
+      {permitted.map((s, i) => (
+        <span key={s.id}>
+          {i > 0 ? ", " : ""}
+          <span className="tabular">{s.id}</span> ({s.hardened.effects} of{" "}
+          {s.expected_effects} allowed)
+        </span>
+      ))}
+      . Each needed <Scope name="credit:issue" tone="required" /> to survive the whole delegation
+      chain and a matching, unexpired, unconsumed approval to exist in the server&rsquo;s own
+      database.
+    </p>
+  );
+}
+
 function letThrough(scenario: Scenario): boolean {
   return scenario.naive.decision === "allowed" && scenario.hardened.decision === "denied";
 }
@@ -138,12 +189,7 @@ export function SecurityMatrix({ matrix }: { matrix: Matrix }) {
         </table>
       </div>
 
-      <p className="text-ink-dim">
-        The one effect the hardened server permitted is the{" "}
-        <span className="tabular">valid_request</span> row, which required{" "}
-        <Scope name="credit:issue" tone="required" /> to survive the whole delegation chain and a
-        matching, unexpired, unconsumed approval to exist in the server&rsquo;s own database.
-      </p>
+      <PermittedByHardened matrix={matrix} />
     </div>
   );
 }
