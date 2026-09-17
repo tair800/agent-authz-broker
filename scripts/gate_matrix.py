@@ -37,10 +37,20 @@ ARTIFACTS = ROOT / "artifacts"
 
 
 def _matrix_shape(matrix: dict[str, Any]) -> dict[str, Any]:
-    """The part of the matrix that must reproduce exactly, run after run."""
+    """The part of the matrix that must reproduce exactly, run after run.
+
+    ``resource_server_url`` is deliberately **not** compared. It is whatever
+    `AAB_RESOURCE_SERVER_URL` is set to — configuration, not a result — and CI runs against
+    `https://broker.example/mcp` while the committed artifact was measured locally. Comparing
+    it failed this gate on a run where every decision, reason and effect count reproduced.
+
+    That it can vary without changing a single outcome is the point rather than an inconvenience:
+    each scenario mints its tokens for whatever audience the run is configured with, so
+    `wrong_audience` means *some other server* at any address. The audience check is relative, and a
+    gate that pinned the address would be asserting something about the environment instead.
+    """
     return {
         "totals": matrix["totals"],
-        "resource_server_url": matrix["resource_server_url"],
         "scenarios": [
             {
                 "id": s["id"],
@@ -123,6 +133,7 @@ def main() -> int:
     matrix, console = asyncio.run(_measure())
 
     print("re-measured against real PostgreSQL; comparing with the committed artifacts")
+    print(f"  audience this run: {matrix['resource_server_url']} (configuration, not compared)")
     ok = _report("matrix", _matrix_shape(_load("matrix.json")), _matrix_shape(matrix))
     ok &= _report(
         "console",
