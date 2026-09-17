@@ -392,6 +392,30 @@ verifier now writes the row itself, with no subject and no token id when the tok
 authenticate — recording the identity it *claimed* would be the trail repeating an attacker's
 assertion as though the server had checked it. Breach 7 plants the removal.
 
+**The demo token mint is open on any non-production instance.** `GET /api/v1/demo/tokens` returns
+five signed bearer tokens for this resource server — valid, wrong-audience, scope-amplifying,
+expired, forged — to any anonymous caller, and its only gate is `AAB_ENVIRONMENT == "production"`,
+while `render.yaml` deploys as `staging`. **That is deliberate, and it is the lab's front door:** a
+visitor who cannot obtain a token cannot drive the demonstration at all.
+
+It is safe to state plainly because a token is the *input* this server exists to disbelieve. Holding
+one buys the audience check, the attenuated chain and the approval gate, all unchanged — and since
+the approval gate now needs `AAB_APPROVER_TOKEN`, which this endpoint does not mint, an anonymous
+visitor holding every token here **still cannot cause an irreversible effect**. That is the whole
+claim, demonstrated rather than asserted. On an instance that is not a public demonstration, set
+`AAB_ENVIRONMENT=production` and the endpoint is gone.
+
+**`read_approval` is the one tool outside the audit trail, and outside the decision path.** Every
+other refusable tool hands its question to `effects.call_tool`, which writes a row whatever the
+answer. `read_approval` reads the approval table directly, scoped to the caller's own verified
+subject: it returns *state*, reaches no verdict, and cannot cause an effect. **So an agent can probe
+it for approval ids without leaving any trace.** The probe learns nothing — an approval belonging to
+another subject and an approval that does not exist both answer `not_found`, which is deliberate
+anti-enumeration — but the absence of a record is real and is stated here rather than left for a
+reader to discover. Routing a stateless read through the decision path would mean inventing a scope
+and a verdict for a question that has neither. Rate limiting, which is what would actually bound a
+probe, is **not built** (ADR-002).
+
 **The denial reason as a leak.** Reasons are a closed `Literal` set and they are specific —
 `audience_mismatch` tells a caller *why*. That is a deliberate trade: an attacker learns a little,
 and an operator and a test learn enough to act. The alternative, a uniform "denied", produces a

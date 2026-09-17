@@ -2,8 +2,11 @@
 
 Operating contract for this repository. Read before any work here.
 
-**Parent portfolio rules remain authoritative.** `../../CLAUDE.md` and
-`../../PORTFOLIO_MASTER_SPEC.md` govern; this file adds project rules and never relaxes a parent one.
+**Parent portfolio rules remain authoritative.** They live in a private planning workspace that
+this repository is a child of and **are deliberately not published here**; they govern, this file
+adds project rules, and nothing here relaxes one. Every rule a reader needs in order to judge this
+repository is in this file or in `DECISIONS.md` — nothing below depends on a document you cannot
+see.
 
 ---
 
@@ -42,11 +45,17 @@ it would pass the test and fail behind two workers.
 requests to the same origin the tools are served from. This route was open in every environment
 until a review used it to produce a real irreversible effect end to end — ADR-004.
 
-### 6. Every refusal is audited, including the ones made before a tool is routed
+### 6. Every authorization decision is audited, including the ones made before a tool is routed
 
 A token the transport rejects never reaches `effects.call_tool`. `BrokerTokenVerifier` writes that
 row itself, with no subject and no token id — an unauthenticated token's claims are assertions, and
 an audit trail that repeats them has been written by the attacker.
+
+**"Decision", not "refusal", and the difference is `read_approval`.** It is the one tool that does
+not call `effects.call_tool`: it returns state, reaches no verdict, and cannot cause an effect, so
+it writes no audit row. An agent can therefore probe it for approval ids without leaving a trace.
+That is accepted — it answers `not_found` uniformly, so the probe learns nothing — and
+`docs/threat-model.md` §10 states it rather than letting this rule imply otherwise.
 
 ### 7. The admin reset is not an MCP tool
 
@@ -58,12 +67,18 @@ Authorization is deterministic code. An agent may ask for anything; what it gets
 
 ### 9. A guard that cannot fail is not a guard
 
-Every control must be shown to be load-bearing by removing it and watching a test go red. All eight
-are a script — `make breaches` — not a table in a document. See ADR-003 and ADR-004.
+Every control must be shown to be load-bearing by removing it and watching a test go red. All ten
+are a script — `make breaches` — not a table in a document. See ADR-003, ADR-004 and ADR-005.
 
 A guard that *cannot* fire is a subtler version of the same thing: the `RecursionError` catch in
 `tokens.py` is unreachable behind the size cap, so it is tested with the cap lifted and labelled as
 defence behind a guard rather than as a guard.
+
+**This rule has been broken twice, in this repository, by the guards written to enforce it.**
+`tests/test_predeclaration.py` checked the kill test as *text* and stayed green under
+`pytest.mark.skip`; `docs/deployment.md` certified the container entrypoint against a *stubbed*
+interpreter, which is how it shipped calling a module that has never existed. Both are ADR-005. A
+guard written in a file nobody plants breaches in is a guard nobody has tested.
 
 ### 10. Secrets
 
@@ -84,9 +99,10 @@ run and is reproducible with `make`.
 ## Key commands
 
 ```bash
-make gate        # lint, types, offline suite, then the adversarial suite
+make gate        # lint, types, offline suite
+make matrix-gate # re-measure and prove every published number still reproduces
 make killtest    # the adversarial suite against real PostgreSQL
-make breaches    # replant all eight breaches; each must turn its tests red
+make breaches    # replant all ten breaches; each must turn its tests red
 make matrix      # measure the security matrix and every console artifact
 make api         # the MCP server + console API
 uv run python -m agent_authz_broker.demo   # measure the security matrix

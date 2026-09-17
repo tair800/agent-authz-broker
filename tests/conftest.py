@@ -9,10 +9,13 @@ answer differently from production would make the whole suite a statement about 
 from __future__ import annotations
 
 import datetime as dt
+import importlib.util
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -162,3 +165,44 @@ async def lab(engine: AsyncEngine) -> AsyncIterator[Lab]:
         await session.execute(delete(AuditEvent))
         await session.execute(delete(Approval))
     yield Lab(engine, TestAuthority())
+
+
+# ----------------------------------------------------------- the kill test must actually run
+
+#: The file whose tests ADR-001 predeclared. Named once.
+KILL_TEST_FILE = "test_kill_criteria.py"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Refuse the whole session if a predeclared kill test has been disabled by a mark.
+
+    `tests/test_predeclaration.py` guards the same property by reading the file as **text**, and a
+    review showed that is not enough: it bans the literal string ``importorskip`` and nothing else,
+    so adding ``pytestmark = pytest.mark.skip`` to the kill test left all three of its assertions
+    green while zero kill tests ran. A guard that inspects source text is guessing at what pytest
+    will do; this one asks pytest what it is actually about to do.
+
+    ``tryfirst`` so this sees the collected items **before** ``-m`` deselection removes them —
+    deselection is not disablement, and the offline lane legitimately deselects every kill test.
+
+    ``UsageError`` rather than a failing test, because a failing test can be deselected too.
+    """
+    if importlib.util.find_spec("agent_authz_broker.authz") is None:
+        return  # Still genuinely predeclared: the package does not exist yet.
+
+    kill = [item for item in items if Path(str(item.fspath)).name == KILL_TEST_FILE]
+    if not kill:
+        return  # This run did not collect that file at all, which is not this hook's business.
+
+    disabled = sorted(
+        item.nodeid
+        for item in kill
+        if item.get_closest_marker("skip") is not None
+        or item.get_closest_marker("skipif") is not None
+    )
+    if disabled:
+        raise pytest.UsageError(
+            "the predeclared kill test has been disabled by a mark, which means the suite that "
+            "proves the central security claim is not running: " + ", ".join(disabled)
+        )

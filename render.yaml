@@ -32,9 +32,15 @@ services:
         value: 10000
 
       # ---- non-secret configuration ------------------------------------------------------
-      # Not `production`: the entrypoint refuses to seed a production instance, and an unseeded
-      # demonstration is an empty console. The accepted values are defined in
-      # src/agent_authz_broker/config.py.
+      # Not `production`, and the reason changed: the entrypoint used to refuse to seed a
+      # production instance, and there is no seed step any more (ADR-005). What `staging` now
+      # decides is that `/api/v1/demo/tokens` stays open, so a visitor can mint the five demo
+      # tokens and drive the lab. **That is an anonymous token mint on a public URL, and it is a
+      # deliberate choice, not an oversight** — a token is the *input* this server exists to
+      # disbelieve, and holding one buys no irreversible effect: the audience, the attenuated
+      # chain and the approval gate all still apply, and approving now needs AAB_APPROVER_TOKEN.
+      # README "Honest limits" and docs/threat-model.md §10 say so where a reader will see it.
+      # The accepted values are defined in src/agent_authz_broker/config.py.
       - key: AAB_ENVIRONMENT
         value: staging
 

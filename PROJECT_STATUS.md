@@ -3,9 +3,10 @@
 Resume point for every session. Read after `CLAUDE.md`, then `git status` and recent commits.
 
 **Current status: FULLY COMPLETE AND FROZEN.** The predeclared kill test A–E passes against real
-PostgreSQL. Two read-only adversarial reviews were run; the second one **broke the headline claim**
-on the deployed path, the hole is closed, and both the hole and the fix are published rather than
-absorbed.
+PostgreSQL. **Three** read-only adversarial reviews were run. The second broke the headline claim on
+the deployed path; the third found that the container could not have booted, and that the guard
+protecting the kill test was itself a guard that could not fail. Every hole is closed, and every one
+of them is published rather than absorbed.
 
 ---
 
@@ -23,11 +24,12 @@ ADR-001 predicted the naive verifier would permit **3**. It permits 2 — approv
 both policies, so they differ only where the difference is a token check. The prediction is kept
 beside the correction.
 
-**51 tests green.** 28 offline, 23 against real PostgreSQL.
+**51 tests green.** 28 offline, 23 against real PostgreSQL. Five CI jobs, including one that
+re-measures every published number and one that replants every breach.
 
 ---
 
-## What the two reviews found
+## What the three reviews found
 
 **Review 1 (ADR-003)** — five controls removed one at a time, five caught. Verdict: each control is
 load-bearing.
@@ -50,7 +52,26 @@ control review 1 had tested**:
 Plus two minor parser findings: an uncaught `RecursionError` on a deeply nested `act` before any
 signature check, and `aud` read as `tuple(anything iterable)`.
 
-`make breaches` replants **all eight** and requires each one's tests to fail. Verified: 8 of 8.
+**Review 3 (ADR-005)** — asked *what did nobody look at?* and got: the shell.
+
+1. **`deployment/entrypoint.sh` called `agent_authz_broker.demo.seed`, a module that has never
+   existed in any commit.** Under `set -eu` with `render.yaml`'s `AAB_ENVIRONMENT=staging`, the
+   container would have exited non-zero before `exec uvicorn` — **the published blueprint could not
+   have booted** — and `make seed`/`make api` were broken the same way. Nothing needed seeding: no
+   table holds an account. The step is removed, not implemented. It survived because §11 certified
+   the entrypoint against a *stubbed* interpreter, which is a check that cannot fail.
+2. **`tests/test_predeclaration.py` was itself the mistake it exists to prevent.** All three checks
+   read the kill test as text; `pytest.mark.skip` left them reporting `3 passed` while zero of the
+   seventeen kill tests ran. Replaced by a `pytest_collection_modifyitems` hook that asks pytest
+   what it is about to run and refuses the session.
+
+Plus: `read_approval` writes no audit row (now stated, and rule 6 scoped to *decisions*), the demo
+token mint is open on non-production instances (now disclosed), and `make help` advertised five
+breaches while the script plants ten.
+
+`make breaches` replants **all ten** and requires each one's tests to fail. Verified: 10 of 10 —
+**and it now runs in CI**, alongside a gate that re-measures the matrix and fails if any published
+number stops reproducing. Those were the two load-bearing claims with no independent execution.
 
 ---
 
@@ -73,8 +94,13 @@ signature check, and `aud` read as `tuple(anything iterable)`.
 - **A stolen, still-valid token is not detected** within its attenuated scope for reversible reads.
 - **Everything is synthetic.** Invented accounts, no payment rail, no external call. The
   "irreversible effect" is a row in a demonstration table.
-- **Two reviews are two reviews.** Each found a hole the author had not thought of. That is evidence
-  about the method, not about the remaining count.
+- **Three reviews are three reviews.** Each found something the previous ones did not, and each
+  found it by changing the *question* rather than looking harder. That is evidence about method, not
+  about the remaining count.
+- **`read_approval` leaves no audit row**, so an agent can probe it for approval ids untraced.
+- **`GET /api/v1/demo/tokens` is open on any non-production instance.** Deliberate — it is the lab's
+  front door — and harmless to the claim: approving needs `AAB_APPROVER_TOKEN`, which it does not
+  mint.
 - **Not built:** Keycloak gap analysis, Redis rate limiting, OpenTelemetry/Langfuse, step-up
   authorization, CIMD-vs-DCR, full RFC 9728/8707/9207 conformance suites. ADR-002 lists each, and
   records that **rate limiting is now delivered nowhere in the portfolio**.
@@ -84,11 +110,12 @@ signature check, and `aud` read as `tuple(anything iterable)`.
 ## Commands
 
 ```bash
-make gate        # lint, types, offline suite
-make killtest    # the adversarial suite against real PostgreSQL
-make breaches    # replant all eight breaches; each must turn its tests red
-make matrix      # measure the security matrix and every console artifact
-make api         # the MCP server + console API on :8000
+make gate         # lint, types, offline suite
+make killtest     # the adversarial suite against real PostgreSQL
+make breaches     # replant all ten breaches; each must turn its own tests red
+make matrix-gate  # prove every published number still reproduces from a fresh run
+make matrix       # measure the security matrix and every console artifact
+make api          # the MCP server + console API on :8000
 uv run python scripts/mcp_smoke.py        # a real MCP client over Streamable HTTP
 
 cd frontend && npm run dev                # the console on :3000

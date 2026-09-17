@@ -1,4 +1,4 @@
-"""Replant the five breaches of ADR-003 and prove the suite still catches each one.
+"""Replant every planted breach and prove the suite still catches each one.
 
 A suite that has never failed is not evidence that a system is safe; it is evidence that nothing
 has tested it. Project 3 in this portfolio shipped a guard that forbade importing a module which
@@ -57,6 +57,7 @@ TOKENS = "src/agent_authz_broker/tokens.py"
 KILL = "tests/test_kill_criteria.py"
 SURFACE = "tests/test_mcp_surface.py"
 BOUNDARIES = "tests/test_authority_boundaries.py"
+PREDECL = "tests/test_predeclaration.py"
 
 BREACHES: tuple[Breach, ...] = (
     Breach(
@@ -152,6 +153,32 @@ BREACHES: tuple[Breach, ...] = (
         after="    except jwt.PyJWTError:",
         tests=(
             f"{BOUNDARIES}::test_the_parse_refuses_rather_than_raising_even_with_the_size_cap_lifted",
+        ),
+    ),
+    # 9 and 10 come from the final review, which found that the guard protecting the kill test was
+    # itself the mistake it warns about: three checks over the file's *text*, all of which stayed
+    # green under `pytest.mark.skip` while zero kill tests ran.
+    Breach(
+        number=9,
+        control="a disabled kill test stops the whole session",
+        file=KILL,
+        before="pytestmark = [pytest.mark.integration, pytest.mark.asyncio]",
+        after=(
+            'pytestmark = [pytest.mark.skip(reason="planted"), '
+            "pytest.mark.integration, pytest.mark.asyncio]"
+        ),
+        # The kill file itself, because conftest's hook only fires on a run that collects it, and
+        # UsageError at collection needs no database.
+        tests=(KILL,),
+    ),
+    Breach(
+        number=10,
+        control="every predeclared scenario reads its effect count from the database",
+        file=KILL,
+        before="    assert await lab.effect_count() == 1\n",
+        after="",
+        tests=(
+            f"{PREDECL}::test_effect_counts_are_read_from_the_database_not_from_a_return_value",
         ),
     ),
 )
@@ -271,7 +298,7 @@ def main() -> int:
 
     print(
         f"{len(selected)} of {len(selected)} controls are load-bearing: "
-        "each removal was caught by the tests ADR-003 and ADR-004 name."
+        "each removal was caught by the tests its ADR names."
     )
     return 0
 

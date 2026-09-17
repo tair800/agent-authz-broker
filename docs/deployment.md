@@ -22,7 +22,7 @@ claims below have been run and which have not.
                                                     ▼
                               Render Web Service (Docker, Free, Frankfurt)
                                  ├─ FastAPI: /mcp, /api/v1/*, /healthz
-                                 └─ entrypoint: alembic upgrade head, then seed, then uvicorn
+                                 └─ entrypoint: alembic upgrade head, then uvicorn
                                                     │  TLS
                                                     ▼
                               Neon PostgreSQL (Free, eu-central-1)
@@ -51,7 +51,7 @@ request path — so a transatlantic hop would be paid on every irreversible call
 
 **Render's free plan spins the instance down after about 15 minutes of inactivity.** The next
 request wakes it, and waking it means pulling the container, starting Python, running
-`alembic upgrade head`, checking whether the database needs seeding, and binding the port. Neon's
+`alembic upgrade head` and binding the port. Neon's
 free tier separately suspends an idle branch, so the first connection also pays a resume.
 
 **Expect roughly 50 seconds for the first request after an idle period.** Subsequent requests are
@@ -87,21 +87,26 @@ answers against a schema it does not expect. In this repository that matters mor
 approval table's unique constraint is what makes one approval authorise exactly one irreversible
 effect, so a half-migrated database is one whose central security property is unproven.
 
-## 4. The demonstration data is seeded on boot, only into an empty database
+## 4. There is nothing to seed, and this section used to say otherwise
 
-`alembic upgrade head` creates the schema and leaves it empty, so a fresh Neon database would serve
-a console with no accounts and no scenarios. The entrypoint therefore also runs
-`python -m agent_authz_broker.demo.seed`, and it is guarded twice, in two different ways:
+The entrypoint ran `python -m agent_authz_broker.demo.seed` between the migration and uvicorn, and
+this section described the two guards around it at length. **That module was never written** — not
+in this commit, not in any commit; `git log --all --diff-filter=A -- "*seed*"` returns nothing.
 
-1. **Never when `AAB_ENVIRONMENT` is `production`.** Seeding writes invented accounts; an instance
-   configured as production must never acquire them whatever else is true.
-2. **Only into an empty database.** That check lives inside the seed module, not in the shell. Two
-   emptiness checks in two languages drift, and the one that matters is the one inside the
-   transaction that does the writing.
+It would have been fatal on deploy. `entrypoint.sh` runs under `set -eu` and the seed branch fires
+whenever `AAB_ENVIRONMENT` is not `production` — and `render.yaml` sets it to `staging`. The
+container would have exited non-zero before `exec uvicorn`. **The blueprint published here could
+not have booted.**
 
-**There is deliberately no reset on this path.** A free container cold-starts often, and a
-reset-on-boot would discard whatever approvals a visitor had just created, mid-demonstration. The
-administrative reset is a separate, explicit operator route — see §7.
+The reason nothing needed seeding is worth stating, because it is why the omission survived: the
+schema has three tables — `approval`, `irreversible_effect`, `audit_event` — and none of them holds
+an account. The synthetic accounts are a dict in `mcp_server.py`; the scenarios are code in
+`demo/matrix.py`. A fresh database is *supposed* to be empty, and the console's empty states say so.
+
+The reason it was not caught is worse, and §11 now says it plainly: the entrypoint was exercised
+against a **stubbed `python`** inside the image. Stubbing the interpreter is a check that cannot
+fail, in the one file this repository never thought to plant a breach in. A read-only review found
+it after everything else had been signed off. [DECISIONS.md](../DECISIONS.md) ADR-005 records it.
 
 ## 5. Configuration
 
@@ -110,7 +115,7 @@ is why the local image and the deployed image are the same image.
 
 | Variable | Secret | What it is |
 |---|---|---|
-| `AAB_ENVIRONMENT` | no | Which deployment this is. `production` suppresses seeding. |
+| `AAB_ENVIRONMENT` | no | Which deployment this is. `production` closes `/api/v1/demo/tokens`. |
 | `AAB_POSTGRES_DSN` | **yes** | The provider's connection string, as given. See §6. |
 | `AAB_RESOURCE_SERVER_URL` | no | **This server's own identity**, and the whole audience check. |
 | `AAB_CORS_ALLOW_ORIGINS` | no | JSON array of browser origins allowed to call the console API. |
@@ -204,7 +209,6 @@ account, no credential, nothing paid.
 make install       # uv sync --frozen
 make db-up         # the postgres:16 in docker-compose.yml, on localhost:15434
 make migrate       # alembic upgrade head
-make seed          # synthetic accounts and the ADR-001 scenarios
 make api           # uvicorn on http://localhost:8000
 ```
 
@@ -257,10 +261,13 @@ assemble the list themselves.
 - Removing `LICENSE` from the build context does fail the build with
   `OSError: License file does not exist: LICENSE`, which is why the Dockerfile copies it beside
   the manifest. That comment is a reproduced result, not folklore.
-- The entrypoint is `sh`-compatible and was exercised against stubbed binaries in the image: it
-  seeds when `AAB_ENVIRONMENT` is unset, does not seed when it is `production`, honours `PORT`,
-  and — the one that matters — **stops with a non-zero exit before starting uvicorn when
-  `alembic upgrade head` fails.**
+- The entrypoint is `sh`-compatible and stops with a non-zero exit before starting uvicorn when
+  `alembic upgrade head` fails. **Read the scope of that claim carefully:** it was exercised against
+  *stubbed binaries* in the image, so what was proven is that the shell's control flow is right —
+  not that the commands it runs exist. A stub cannot fail, and that is exactly how the entrypoint
+  shipped for days calling `agent_authz_broker.demo.seed`, a module that has never existed in any
+  commit, under `set -eu` with `AAB_ENVIRONMENT=staging`. The seed step is gone (§4); this bullet
+  is left narrower rather than deleted, because the lesson is the narrowing.
 - `render.yaml` and the CI workflow parse. The secret scan's four patterns catch a private-key
   block, a committed reset or approver token and a JWT literal, and match nothing in this
   repository including the workflow that defines them.
@@ -276,7 +283,8 @@ assemble the list themselves.
   both with `tool` recorded as `-` because the request was never routed. A reviewer measured **zero**
   rows for both of those before the fix.
 
-**Verified by deploying**, after the above was written:
+**Verified by deploying.** (Two bullets in the list above were added *after* this deployment, in
+`2860982`; they are scoped to what they say and nothing above depends on the ordering.)
 
 - The console is live on Vercel Hobby at `https://agent-authz-broker.vercel.app`. Every route
   answers 200, and each one states on its face that it is rendering committed artifacts rather than
@@ -284,8 +292,8 @@ assemble the list themselves.
 
 **Not verified:** the resource server has **not** been deployed. Render and Neon were never
 provisioned — `https://agent-authz-broker.onrender.com/healthz` returns 404 — so no MCP client has
-connected to a deployed instance, the entrypoint's migrate-then-seed-then-serve sequence has run
-only against local PostgreSQL, and the ~50 s cold start is the platform's documented behaviour
+connected to a deployed instance, the entrypoint's migrate-then-serve sequence has never run
+against anything but stubbed binaries, and the ~50 s cold start is the platform's documented behaviour
 rather than a measurement of this service. The image build was exercised with a placeholder
 `alembic.ini`, because the real migration environment had not landed when this was written.
 

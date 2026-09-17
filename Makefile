@@ -13,7 +13,7 @@ PG_PORT := 15434
 DSN := postgresql://aab:aab_local_dev@localhost:$(PG_PORT)/aab
 AUD := http://localhost:8000/mcp
 
-.PHONY: help install fmt lint types test gate db-up migrate seed killtest breaches matrix api clean
+.PHONY: help install fmt lint types test gate db-up migrate killtest breaches matrix matrix-gate api clean
 
 help: ## List the targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -48,16 +48,20 @@ db-up: ## Start the local PostgreSQL from docker-compose.yml and wait for it
 migrate: db-up ## Bring the schema to head
 	AAB_POSTGRES_DSN=$(DSN) uv run alembic upgrade head
 
-seed: migrate ## Seed the synthetic accounts and the ADR-001 scenarios. Never deletes.
-	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local \
-	  uv run python -m agent_authz_broker.demo.seed
+# There is no `seed` target. It ran `python -m agent_authz_broker.demo.seed`, a module that was
+# never written -- nothing in the schema holds an account, so there was never anything to seed.
+# `make api` therefore depends on `migrate`. See DECISIONS.md ADR-005.
 
 killtest: migrate ## THE ADVERSARIAL SUITE. Every count comes from irreversible_effect.
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) \
 	  uv run pytest -m integration
 
-breaches: migrate ## Replant ADR-003's five breaches and require the suite to catch each one
+breaches: migrate ## Replant all ten planted breaches; each must turn its own tests red
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) 	  uv run python scripts/plant_breaches.py
+
+matrix-gate: migrate ## Re-measure and prove every committed number still reproduces
+	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) \
+	  uv run python scripts/gate_matrix.py
 
 matrix: migrate ## Measure the security matrix and write every console artifact
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) 	  uv run python -m agent_authz_broker.demo
@@ -65,7 +69,7 @@ matrix: migrate ## Measure the security matrix and write every console artifact
 # Forwarded, never defaulted. A value here would be a committed credential for granting
 # approvals, and an empty one is read as unset (see config.py), so POST /api/v1/approvals
 # is simply unavailable unless you export this yourself before running the target.
-api: seed ## Serve the MCP server and the console API against the seeded database
+api: migrate ## Serve the MCP server and the console API
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) \
 	  AAB_APPROVER_TOKEN="$(AAB_APPROVER_TOKEN)" \
 	  uv run uvicorn "agent_authz_broker.app:create_app" --factory --port 8000

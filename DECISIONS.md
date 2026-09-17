@@ -158,7 +158,7 @@ semantics.** Those are this repository's own adversarial suite, and the README k
 
 **Status:** accepted, 2026-09-13, **before implementation**.
 
-`PORTFOLIO_BLUEPRINT.md` §4 specifies an XL build (~28 sessions): self-hosted Keycloak with an RFC
+The portfolio blueprint (a private planning document, not published in this repository) specifies an XL build (~28 sessions): self-hosted Keycloak with an RFC
 gap analysis, Redis rate limiting, OpenTelemetry GenAI semconv into self-hosted Langfuse, step-up
 authorization, Client ID Metadata Documents versus DCR, RFC 9728/8707/9207 conformance suites, and
 Cloud Run + Cloud SQL. The owner's instruction for this increment is a 1–2 day fast-track that
@@ -181,8 +181,9 @@ adversarial suite, and the naive-versus-hardened comparison — that is, the who
 | Full RFC 9728 / 8707 / 9207 conformance suites | **Not built.** RFC 8707's resource indicator is *used* — it is how audience binding is expressed — but no conformance suite is claimed. |
 | Cloud Run + Cloud SQL | **Not used.** Render Free + Neon Free, per the owner's zero-cost instruction. |
 
-**The portfolio consequence, recorded rather than absorbed:** `SKILL_MATRIX.md` makes project 4 the
-**sole home** of *MCP server design*, *OAuth 2.1 / authn / authz*, *rate limiting* and *API security*.
+**The portfolio consequence, recorded rather than absorbed:** the portfolio's skill matrix (again a
+private planning document) makes project 4 the **sole home** of *MCP server design*,
+*OAuth 2.1 / authn / authz*, *rate limiting* and *API security*.
 MCP and resource-server authorization are delivered. **Rate limiting is now delivered nowhere in the
 portfolio** and that row must be corrected or re-homed.
 
@@ -211,7 +212,7 @@ Every control was restored and the full suite was green: **32 tests** at that da
 
 **The removals are a script, not a memory of an afternoon.** A reviewer pointed out that this table
 was exactly as checkable as the Project 3 guard it opens by warning about — a claim in a document.
-So `scripts/plant_breaches.py` holds all five. It refuses to start against a dirty tree, edits one
+So `scripts/plant_breaches.py` holds them, alongside the five that later reviews added. It refuses to start against a dirty tree, edits one
 source file, runs **only** the tests named in the table above, requires them to fail, and restores
 the file in a `finally`:
 
@@ -321,3 +322,87 @@ Two reviews are two reviews. The first found a hole the author had not thought o
 second, which is evidence about the method rather than about the remaining count. The largest
 unmitigated item is unchanged: a stolen, still-valid token used within its attenuated scope for
 reversible reads is not detected here.
+
+---
+
+## ADR-005 — The third review: the container could not have booted
+
+**Status:** accepted, 2026-09-17, **after** ADR-004 and after the project had been called complete.
+
+ADR-004 closed two holes a security reviewer found by attacking a copy of the running system. This
+one was found by asking a different question — *what did nobody look at?* — and the answer was: the
+shell.
+
+### 1. The entrypoint called a module that has never existed
+
+`deployment/entrypoint.sh` ran `python -m agent_authz_broker.demo.seed` between the migration and
+uvicorn. **There is no such module, and `git log --all --diff-filter=A -- "*seed*"` shows there
+never was one in any commit.**
+
+`entrypoint.sh` runs under `set -eu`, the seed branch fires whenever `AAB_ENVIRONMENT` is not
+`production`, and `render.yaml` sets it to `staging`. The container would have exited non-zero
+before `exec uvicorn`. **The deployment blueprint this repository publishes could not have booted.**
+`make seed` and `make api` were broken the same way, and both are the documented local run path.
+
+Nothing needed seeding, which is why the gap survived unnoticed: the schema has three tables —
+`approval`, `irreversible_effect`, `audit_event` — and not one of them holds an account. The
+synthetic accounts are a dict in `mcp_server.py`; the scenarios are code in `demo/matrix.py`.
+
+**The step is removed rather than implemented.** Writing a seeder that seeds nothing, so that a
+document describing it could stay true, is the wrong repair.
+
+**Why nothing caught it, which is the part worth keeping.** `docs/deployment.md` §11 certified the
+entrypoint as *"exercised against stubbed binaries in the image: it seeds when `AAB_ENVIRONMENT` is
+unset."* The stub was a `python` that always succeeded. **Stubbing the interpreter makes the check
+one that cannot fail** — the precise failure this repository plants breaches to avoid, in the one
+file nobody thought to plant a breach in. Every guard was aimed at `src/`; the defect was in `sh`.
+§11 now states the narrow thing that was actually proven.
+
+### 2. The guard protecting the kill test was itself a guard that could not fail
+
+`tests/test_predeclaration.py` exists because of Project 3's vacuous guard, and its own docstring
+says *"a check that cannot fail is not a check."* All three of its assertions read
+`test_kill_criteria.py` as **text**: seven names appear, the string `importorskip` does not, and
+`await lab.effect_count()` occurs at least seven times.
+
+A reviewer pointed out that this bans one spelling of one mechanism. Adding
+`pytest.mark.skip(reason="flaky")` to the kill test's `pytestmark` leaves all three green. Verified
+exactly: with the module skipped, `pytest tests/test_predeclaration.py` reports **3 passed** while
+**zero of the seventeen kill tests run**. The count check had slack of its own — threshold seven
+against a file containing eight, so one database read could be deleted unnoticed.
+
+**Closed by asking pytest instead of reading source.** `pytest_collection_modifyitems` in
+`tests/conftest.py`, `tryfirst` so it sees items before `-m` deselection removes them, refuses the
+whole session with a `UsageError` if any collected kill test carries `skip` or `skipif`.
+`UsageError` rather than a failing test, because a failing test can be deselected too. With the same
+sabotage planted, it now names all seventeen and stops the run.
+
+The text checks stay as a second line — they catch what collection cannot see, a `pytest.skip()`
+inside a body — and were widened from `importorskip` to every spelling. The effect-count check is
+now per scenario via `ast` rather than a count over the file.
+
+### 3. Four smaller corrections
+
+- **`read_approval` is outside the audit trail**, because it reaches no verdict and can cause no
+  effect. True and defensible; but rule 6 said *"every refusal is audited"*, which implied
+  otherwise. The rule is now scoped to *decisions*, and `docs/threat-model.md` §10 states that an
+  agent can probe that tool without leaving a trace.
+- **`GET /api/v1/demo/tokens` is open on any non-production instance**, and `render.yaml` deploys as
+  `staging`. Deliberate — it is the lab's front door — and now disclosed in the threat model with
+  the reason it is safe to say out loud: the approval gate needs `AAB_APPROVER_TOKEN`, which this
+  endpoint does not mint, so an anonymous visitor holding every token here still cannot cause an
+  irreversible effect.
+- **`make help` advertised "ADR-003's five breaches"** while the script plants ten.
+- **Four backticked paths pointed at private planning documents** absent from this public
+  repository. Named as private rather than left dangling.
+
+### What this review does not establish
+
+Three reviews have now each found something the previous two did not, and each found it by changing
+the *question* rather than by looking harder. That is evidence about method, not about a remaining
+count. The largest item is still unchanged: a stolen, still-valid token used within its attenuated
+scope for reversible reads is not detected here.
+
+**Two load-bearing claims still have no independent execution**: `make breaches` and `make matrix`
+run nowhere but on a developer's machine. Both now run in CI — `matrix` against a stable-field gate
+rather than a byte diff, because every run mints fresh ids — which is what closes it.

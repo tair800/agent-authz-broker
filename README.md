@@ -19,7 +19,8 @@ load-bearing by removing it and watching the tests go red.
 Six scenarios, two verifiers, one database. Written by
 `python -m agent_authz_broker.demo` into [`artifacts/matrix.json`](artifacts/matrix.json); every
 effect count is `SELECT count(*) FROM irreversible_effect` from a clean database. **No number below
-was typed.**
+was typed** — and CI re-measures on every push and fails if one of them stops reproducing, because
+"nobody typed it" is a claim about a file, and a file cannot vouch for itself.
 
 | Scenario | Naive baseline | **Hardened** | Effects (naive → hardened) |
 |---|---|---|---|
@@ -93,7 +94,7 @@ concurrency test and fail behind two workers, so there is no lock in this reposi
 
 ---
 
-## The adversarial review: eight breaches planted, eight caught
+## The adversarial review: ten breaches planted, ten caught
 
 A suite that has never failed is not evidence the system is safe. Each control was removed in turn
 and the suite re-run.
@@ -108,6 +109,8 @@ and the suite re-run.
 | the approver credential no longer gates `POST /api/v1/approvals` | two boundary tests **failed** |
 | a refusal at the transport is not written to the audit trail | two boundary tests **failed** |
 | `verify_token` stops catching `RecursionError` | the parse test **failed**, as a raw crash |
+| `pytest.mark.skip` on the whole kill test | the session **refused to start** |
+| one scenario stops reading its effect count from the database | the predeclaration guard **failed** |
 
 Breach 3 is the informative one: removing the application-level guard did not produce a wrong
 answer, it produced a constraint violation. The database refused the second effect on its own, which
@@ -120,9 +123,17 @@ transport produced no audit row at all, so the trail was blind to precisely the 
 [ADR-004](DECISIONS.md) has both, including why no test in the suite was positioned to catch the
 second.
 
-**Re-run it yourself — the table is a script.** `make breaches` replants all eight against your
-checkout, requires the named tests to fail each time, restores every file, and exits non-zero if
-any control turns out not to be load-bearing. All controls restored; **51 tests green**.
+The last two come from a **third** review, which asked *what did nobody look at?* — and found that
+the guard protecting the kill test was itself the mistake it warns about. All three of its checks
+read the kill test as **text**, so adding `pytest.mark.skip` left them reporting `3 passed` while
+zero of the seventeen kill tests ran. It now asks pytest what it is about to run instead of reading
+source. The same review found the container entrypoint calling a module that has never existed —
+[ADR-005](DECISIONS.md).
+
+**Re-run it yourself — the table is a script, and CI runs it.** `make breaches` replants all ten
+against your checkout, requires the named tests to fail each time, restores every file, and exits
+non-zero if any control turns out not to be load-bearing. All controls restored; **51 tests
+green**.
 
 ---
 
@@ -182,6 +193,17 @@ be silent, which meant the trail was blind to precisely the attacks above.
   token, `POST` an approval naming its own subject, call `issue_credit` over real MCP, and
   `SELECT count(*) FROM irreversible_effect` returns 1. "No MCP route to it" is not the boundary
   that matters when both surfaces share one origin.
+- **The demo token mint is open on any non-production instance.** `GET /api/v1/demo/tokens` hands
+  five signed tokens — valid, wrong-audience, scope-amplifying, expired, forged — to any anonymous
+  caller, because a visitor who cannot get a token cannot drive the lab. It is safe to say out loud:
+  a token is the *input* this server exists to disbelieve, and since approving now needs
+  `AAB_APPROVER_TOKEN`, which this endpoint does not mint, **an anonymous visitor holding every one
+  of those tokens still cannot cause an irreversible effect.** Set `AAB_ENVIRONMENT=production` and
+  the endpoint is gone.
+- **`read_approval` leaves no audit row.** It is the one tool that reaches no verdict and can cause
+  no effect, so it does not go through the decision path — which means an agent can probe it for
+  approval ids untraced. It answers `not_found` uniformly so the probe learns nothing, and rate
+  limiting, which is what would actually bound it, is not built.
 - **This is a resource server, not an authorization server.** The test authority mints tokens with
   real Ed25519 keys and is otherwise not an IdP: no clients, no consent, no discovery, no refresh.
   It is a lab instrument.
@@ -200,11 +222,13 @@ be silent, which meant the trail was blind to precisely the attacks above.
 ## Run it
 
 ```bash
-make install     # uv sync --frozen
-make db-up       # PostgreSQL
-make migrate     # alembic upgrade head
-make killtest    # the adversarial suite against real PostgreSQL
-make api         # the MCP server + console API on :8000
+make install      # uv sync --frozen
+make db-up        # PostgreSQL
+make migrate      # alembic upgrade head
+make killtest     # the adversarial suite against real PostgreSQL
+make breaches     # replant all ten breaches; each must turn its own tests red
+make matrix-gate  # prove every number above still reproduces from a fresh run
+make api          # the MCP server + console API on :8000
 ```
 
 ```bash
@@ -217,7 +241,7 @@ cd frontend && npm install && npm run dev    # the console on :3000
 
 | File | Purpose |
 |---|---|
-| [`DECISIONS.md`](DECISIONS.md) | ADR-001: the claim, threat model and kill test, **declared before implementation**. ADR-002: what is not built. ADR-003 and ADR-004: two adversarial reviews, and what the second one found that the first could not |
+| [`DECISIONS.md`](DECISIONS.md) | ADR-001: the claim, threat model and kill test, **declared before implementation**. ADR-002: what is not built. ADR-003/004/005: three adversarial reviews, each finding what the previous ones could not — the third found that the container could not have booted |
 | [`docs/threat-model.md`](docs/threat-model.md) | each adversary capability, its mitigation, and what is **not** mitigated |
-| [`docs/deployment.md`](docs/deployment.md) | topology and the honest cold-start note |
+| [`docs/deployment.md`](docs/deployment.md) | topology, what is deployed and what is not, and §11's split between what was run and what was merely written |
 | [`CLAUDE.md`](CLAUDE.md) | the operating rules this repository is built under |

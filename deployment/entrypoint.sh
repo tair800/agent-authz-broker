@@ -1,5 +1,5 @@
 #!/bin/sh
-# Container entrypoint: bring the schema to head, seed the demonstration if this is one, then serve.
+# Container entrypoint: bring the schema to head, then serve. There is nothing to seed -- see below.
 #
 # `set -e` carries more weight here than usual. A failed migration must stop the container rather
 # than let uvicorn come up against a schema the code does not expect — and in this repository the
@@ -29,29 +29,22 @@ set -eu
 echo "entrypoint: applying migrations"
 alembic upgrade head
 
-# ----------------------------------------------------------------------------------- demo data
+# ------------------------------------------------------------------------- nothing to seed
 #
-# `alembic upgrade head` leaves the schema empty, so a fresh database would serve a console with
-# no accounts and no scenarios to run. The seed module fills it with synthetic accounts and the
-# ADR-001 scenarios.
+# There is no seed step, and the absence is deliberate rather than an omission.
 #
-# Two guards, and they are different in kind:
+# This entrypoint used to run `python -m agent_authz_broker.demo.seed`. **That module was never
+# written.** The schema has three tables -- approval, irreversible_effect, audit_event -- and not
+# one of them holds an account: the synthetic accounts are a dict in `mcp_server.py`, and the
+# scenarios are code in `demo/matrix.py`. There was never anything for a seeder to insert.
 #
-#   1. **Never in production.** Seeding writes invented accounts. An instance configured as
-#      production must never acquire them, whatever else is true.
-#   2. **Only into an empty database.** That check lives in the seed module, which seeds an empty
-#      database and returns without writing otherwise. It is deliberately not duplicated here:
-#      two emptiness checks in two languages drift, and the one that matters is the one inside the
-#      transaction that does the writing.
+# Under `set -eu` with `AAB_ENVIRONMENT=staging` (what `render.yaml` sets), that line would have
+# exited non-zero here, before `exec uvicorn`. The blueprint this repository publishes could not
+# have booted. It was not caught because the entrypoint was only ever exercised against a *stubbed*
+# `python` in the image, which is a check that cannot fail -- the failure mode this repository
+# plants breaches to avoid, in the one file nobody thought to plant one in.
 #
-# There is deliberately **no reset** on this path. A free container cold-starts often, and a
-# reset-on-boot would discard whatever approvals a visitor had just created — mid-demonstration.
-if [ "${AAB_ENVIRONMENT:-local}" != "production" ]; then
-  echo "entrypoint: seeding the demonstration if the database is empty"
-  python -m agent_authz_broker.demo.seed
-else
-  echo "entrypoint: AAB_ENVIRONMENT is production, not seeding"
-fi
+# See DECISIONS.md ADR-005.
 
 # ------------------------------------------------------------------------------------- serve
 #

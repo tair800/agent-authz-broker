@@ -220,7 +220,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         Unset disables the route rather than leaving it open, exactly as the reset does: a demo
         whose approvals anyone can mint is a demo whose irreversible-effect count means nothing.
-        `make seed` and the measurement create approvals in-process and are unaffected.
+        The measurement (`make matrix`) creates approvals in-process and is unaffected.
         """
         expected = resolved.approver_token
         if expected is None:

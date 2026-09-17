@@ -90,6 +90,54 @@ jobs:
       - name: The adversarial suite
         run: uv run pytest -m integration
 
+  evidence:
+    name: The published numbers, and every planted breach
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aab
+          POSTGRES_PASSWORD: aab_ci_ephemeral
+          POSTGRES_DB: aab
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aab -d aab"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      # A throwaway container on the runner's loopback, destroyed with the job. The password is
+      # here on purpose: it is not a credential, and pretending it is would teach the wrong lesson
+      # about which values in this repository actually matter.
+      AAB_POSTGRES_DSN: postgresql://aab:aab_ci_ephemeral@localhost:5432/aab
+      AAB_ENVIRONMENT: ci
+      AAB_RESOURCE_SERVER_URL: https://broker.example/mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      - run: uv run alembic upgrade head
+
+      # The artifacts are the sole source of every published number, and nothing used to
+      # regenerate them. A review named that the weakest link in the evidence chain: internal
+      # consistency is a property a hand-edited file has too. This re-measures against real
+      # PostgreSQL and compares the fields that must reproduce -- not a byte diff, because
+      # every run mints fresh ids and a gate that fails on a correct run is a gate people
+      # learn to ignore.
+      - name: Every published number still reproduces
+        run: uv run python scripts/gate_matrix.py
+
+      # ADR-003/004/005's planted breaches, run rather than described. Each removes one
+      # control, requires the tests that control's ADR names to FAIL, and restores the file.
+      # It refuses to start against a dirty tree and checks the tree again at the end, so a
+      # crash mid-run cannot be mistaken for source anybody wrote.
+      - name: Every control is load-bearing
+        run: uv run python scripts/plant_breaches.py
+
   console:
     name: Console lint, type check, test and build
     runs-on: ubuntu-latest
