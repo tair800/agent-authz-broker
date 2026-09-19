@@ -48,6 +48,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    rate_limit_per_minute: int = Field(
+        default=30,
+        ge=0,
+        description=(
+            "Most calls one verified subject may make to one tool per fixed 60-second window. "
+            "0 disables the limit entirely. It bounds an authenticated caller's rate; it is not "
+            "DDoS protection and is not offered as any."
+        ),
+    )
+
     approver_token: SecretStr | None = Field(
         default=None,
         description=(

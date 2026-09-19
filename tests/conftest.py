@@ -25,12 +25,20 @@ from agent_authz_broker.approvals import create_approval
 from agent_authz_broker.authz import HARDENED, NAIVE
 from agent_authz_broker.config import Settings
 from agent_authz_broker.db.engine import async_dsn
-from agent_authz_broker.db.models import Approval, AuditEvent, Base, IrreversibleEffect
+from agent_authz_broker.db.models import (
+    Approval,
+    AuditEvent,
+    Base,
+    IrreversibleEffect,
+    RateLimitCounter,
+)
 from agent_authz_broker.effects import ToolOutcome, call_tool
 from agent_authz_broker.testauthority import TestAuthority
 from agent_authz_broker.tokens import verify_token
 
 THIS_SERVER = "https://broker.example/mcp"
+
+READ, FLAG, CREDIT = "account:read", "account:flag", "credit:issue"
 
 Mutation = Literal[
     "expired", "other_tool", "other_account", "other_subject", "other_amount", "already_consumed"
@@ -57,8 +65,22 @@ class Lab:
         return verify_token(token, jwks_by_issuer=self.jwks)
 
     async def call_issue_credit(
-        self, *, token: str, account: str, amount: int, policy: Any = None
+        self,
+        *,
+        token: str,
+        account: str,
+        amount: int,
+        policy: Any = None,
+        now: dt.datetime | None = None,
+        rate_limit_per_minute: int = 0,
     ) -> ToolOutcome:
+        """The same call path the MCP tools take.
+
+        ``rate_limit_per_minute`` defaults to 0 -- off -- so the kill test measures authorization
+        and nothing else. A ceiling silently applied to the suite that proves the security claim
+        could turn a real authorization failure into a refusal for an unrelated reason, and the
+        test would still be green.
+        """
         return await call_tool(
             self.engine,
             token=token,
@@ -67,6 +89,17 @@ class Lab:
             authority_jwks=self.jwks,
             audience=THIS_SERVER,
             policy=policy or self.hardened,
+            now=now,
+            rate_limit_per_minute=rate_limit_per_minute,
+        )
+
+    def valid_token(self, *, subject: str) -> str:
+        """A token this server accepts: right audience, unexpired, correctly attenuated."""
+        return self.authority.mint_delegated(
+            chain=[("alice", [READ, FLAG, CREDIT])],
+            subject=subject,
+            audience=THIS_SERVER,
+            scopes=[READ, CREDIT],
         )
 
     async def approve(
@@ -164,6 +197,7 @@ async def lab(engine: AsyncEngine) -> AsyncIterator[Lab]:
         await session.execute(delete(IrreversibleEffect))
         await session.execute(delete(AuditEvent))
         await session.execute(delete(Approval))
+        await session.execute(delete(RateLimitCounter))
     yield Lab(engine, TestAuthority())
 
 

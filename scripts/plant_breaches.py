@@ -58,6 +58,8 @@ KILL = "tests/test_kill_criteria.py"
 SURFACE = "tests/test_mcp_surface.py"
 BOUNDARIES = "tests/test_authority_boundaries.py"
 PREDECL = "tests/test_predeclaration.py"
+RATELIMIT_TESTS = "tests/test_rate_limit.py"
+RATELIMIT = "src/agent_authz_broker/ratelimit.py"
 
 BREACHES: tuple[Breach, ...] = (
     Breach(
@@ -179,6 +181,20 @@ BREACHES: tuple[Breach, ...] = (
         after="",
         tests=(
             f"{PREDECL}::test_effect_counts_are_read_from_the_database_not_from_a_return_value",
+        ),
+    ),
+    # 11 covers the rate limiter, which is secondary to the security claim but still has to be
+    # shown to work rather than asserted. Read-then-write is the plausible wrong implementation --
+    # it looks correct and leaks under exactly the concurrency the bound is quoted for.
+    Breach(
+        number=11,
+        control="the rate-limit claim is atomic, so the bound holds under concurrency",
+        file=RATELIMIT,
+        before='            set_={"count": RateLimitCounter.count + 1},',
+        after='            set_={"count": RateLimitCounter.count},',
+        tests=(
+            f"{RATELIMIT_TESTS}::test_above_the_limit_the_call_is_denied_and_writes_no_effect",
+            f"{RATELIMIT_TESTS}::test_concurrent_calls_cannot_exceed_the_documented_bound",
         ),
     ),
 )

@@ -32,7 +32,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from agent_authz_broker.approvals import create_approval
 from agent_authz_broker.authz import HARDENED, NAIVE, Policy, effective_scopes
-from agent_authz_broker.db.models import Approval, AuditEvent, IrreversibleEffect
+from agent_authz_broker.db.models import (
+    Approval,
+    AuditEvent,
+    IrreversibleEffect,
+    RateLimitCounter,
+)
 from agent_authz_broker.domain import TOOL_SCOPES, TokenClaims
 from agent_authz_broker.effects import call_tool
 from agent_authz_broker.testauthority import TestAuthority
@@ -191,6 +196,7 @@ async def _reset(engine: AsyncEngine) -> None:
         await session.execute(delete(IrreversibleEffect))
         await session.execute(delete(AuditEvent))
         await session.execute(delete(Approval))
+        await session.execute(delete(RateLimitCounter))
 
 
 async def _effects(engine: AsyncEngine) -> int:

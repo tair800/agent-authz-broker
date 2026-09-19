@@ -53,6 +53,10 @@ DenialReason = Literal[
     "approval_expired",
     "approval_already_consumed",
     "unknown_tool",
+    # Not an authority failure: the caller had the authority and asked too often. It is last
+    # because it is the only reason here that says nothing about whether the request was
+    # legitimate -- a permitted caller hitting the ceiling gets this, and so does an abusive one.
+    "rate_limited",
 ]
 
 

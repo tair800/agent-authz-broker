@@ -1,4 +1,4 @@
-"""Three tables. Each one exists because something in ADR-001's threat model has to be durable.
+"""Four tables. Each one exists because something in the threat model has to be durable.
 
 The load-bearing schema decisions are both on :class:`IrreversibleEffect`, and both are constraints
 rather than code:
@@ -29,7 +29,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Approval", "AuditEvent", "Base", "IrreversibleEffect", "new_id"]
+__all__ = ["Approval", "AuditEvent", "Base", "IrreversibleEffect", "RateLimitCounter", "new_id"]
 
 
 def new_id(prefix: str) -> str:
@@ -124,3 +124,30 @@ class AuditEvent(Base):
     effect_id: Mapped[str | None] = mapped_column(String(40))
 
     __table_args__ = (Index("ix_audit_at", "at"),)
+
+
+class RateLimitCounter(Base):
+    """How many times one subject has called one tool inside one fixed window.
+
+    **In the database and not in the process, for the same reason the approval is.** An in-memory
+    counter states a bound per worker, so "30 per minute" silently becomes 30 x N behind N of them —
+    and on a free plan that reads as correct right up to the day somebody scales it. The counter is
+    a row, incremented by ``INSERT … ON CONFLICT DO UPDATE … RETURNING``, so the number a caller
+    gets back is its position in a single global sequence however many processes are serving.
+
+    The primary key **is** the bucket: (subject, tool, window_start). Two subjects cannot share one,
+    and neither can two tools, because there is no row for them to share.
+
+    Windows are fixed rather than sliding. That is a deliberate, stated weakness: a caller can spend
+    its whole allowance at the end of one window and again at the start of the next, so the true
+    worst case over an arbitrary 60 seconds is **twice** the limit. Sliding windows cost a row per
+    request; this costs one row per bucket. `docs/threat-model.md` states the burst rather than
+    rounding it away.
+    """
+
+    __tablename__ = "rate_limit_counter"
+
+    subject: Mapped[str] = mapped_column(String(200), primary_key=True)
+    tool: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_start: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

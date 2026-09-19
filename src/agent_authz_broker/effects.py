@@ -28,6 +28,7 @@ from agent_authz_broker.approvals import consume_approval, find_matching_approva
 from agent_authz_broker.authz import HARDENED, Policy, authorize
 from agent_authz_broker.db.models import AuditEvent, IrreversibleEffect, new_id
 from agent_authz_broker.domain import IRREVERSIBLE_TOOLS, Decision, DenialReason
+from agent_authz_broker.ratelimit import consume_quota
 from agent_authz_broker.tokens import verify_token
 
 __all__ = ["ToolOutcome", "call_tool", "record_transport_refusal"]
@@ -130,6 +131,7 @@ async def call_tool(
     audience: str,
     policy: Policy = HARDENED,
     now: dt.datetime | None = None,
+    rate_limit_per_minute: int = 0,
 ) -> ToolOutcome:
     """Run one tool call through every gate, and write at most one irreversible effect.
 
@@ -145,6 +147,11 @@ async def call_tool(
         policy: HARDENED in production. NAIVE exists so the demonstration can run the same scenarios
             through the baseline and count what it would have permitted.
         now: Injected for deterministic expiry tests.
+        rate_limit_per_minute: Most calls this subject may make to this tool per fixed 60-second
+            window; 0 disables it. Passed in rather than read from configuration here, so that the
+            measurement and the kill test choose their own ceiling instead of inheriting a
+            deployment's -- a matrix whose numbers moved when an operator changed an unrelated
+            setting would not be a measurement of anything.
 
     Returns:
         The outcome. An effect id is present only when a row was actually written.
@@ -161,6 +168,42 @@ async def call_tool(
 
     async with AsyncSession(engine) as session, session.begin():
         token_id = verdict.token_id
+
+        # The ceiling is claimed only once the caller has been found to have the authority, and
+        # before anything irreversible happens. Both halves of that are deliberate.
+        #
+        # Counting refused calls would let an attacker exhaust a *legitimate* subject's allowance
+        # by spraying its name at a tool it cannot use -- the refusal is free to produce and the
+        # denial-of-service would land on the victim rather than the attacker. Refusals are
+        # recorded in the audit trail, which is where a pattern of them belongs.
+        #
+        # Claiming it inside this transaction means a call that rolls back does not spend quota it
+        # never used, and a call that succeeds cannot have its effect written without the claim.
+        if verdict.allowed and rate_limit_per_minute > 0 and verdict.subject is not None:
+            used = await consume_quota(session, subject=verdict.subject, tool=tool, now=moment)
+            if used > rate_limit_per_minute:
+                audit = await _record(
+                    session,
+                    tool=tool,
+                    policy=policy.name,
+                    decision=Decision.DENIED,
+                    reason="rate_limited",
+                    subject=verdict.subject,
+                    token_id=token_id,
+                    effective=verdict.effective_scopes,
+                    required=verdict.required_scope,
+                )
+                return ToolOutcome(
+                    decision=Decision.DENIED,
+                    reason="rate_limited",
+                    effective_scopes=verdict.effective_scopes,
+                    chain_scopes=verdict.chain_scopes,
+                    required_scope=verdict.required_scope,
+                    subject=verdict.subject,
+                    audit_id=audit,
+                    policy=policy.name,
+                    detail={"limit_per_minute": rate_limit_per_minute, "used": used},
+                )
 
         if not verdict.allowed:
             audit = await _record(

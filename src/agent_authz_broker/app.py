@@ -36,7 +36,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from agent_authz_broker.approvals import create_approval, list_approvals
 from agent_authz_broker.config import Settings
 from agent_authz_broker.db.engine import build_engine
-from agent_authz_broker.db.models import Approval, AuditEvent, IrreversibleEffect
+from agent_authz_broker.db.models import (
+    Approval,
+    AuditEvent,
+    IrreversibleEffect,
+    RateLimitCounter,
+)
 from agent_authz_broker.mcp_server import create_server
 from agent_authz_broker.testauthority import TestAuthority
 
@@ -397,6 +402,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await session.execute(delete(IrreversibleEffect))
             await session.execute(delete(AuditEvent))
             await session.execute(delete(Approval))
+            await session.execute(delete(RateLimitCounter))
         return {"status": "reset"}
 
     # --------------------------------------------------------------------------- the MCP surface

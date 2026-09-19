@@ -420,6 +420,7 @@ def create_server(
             policy=HARDENED,
             authority_jwks=authority_jwks,
             audience=audience,
+            rate_limit_per_minute=settings.rate_limit_per_minute,
         )
         outcome = _outcome(result)
         if result.decision is not Decision.ALLOWED:
@@ -447,6 +448,7 @@ def create_server(
             policy=HARDENED,
             authority_jwks=authority_jwks,
             audience=audience,
+            rate_limit_per_minute=settings.rate_limit_per_minute,
         )
         outcome = _outcome(result)
         allowed = result.decision is Decision.ALLOWED
@@ -570,6 +572,7 @@ def create_server(
             policy=HARDENED,
             authority_jwks=authority_jwks,
             audience=audience,
+            rate_limit_per_minute=settings.rate_limit_per_minute,
         )
         outcome = _outcome(result)
         return CreditResult(
