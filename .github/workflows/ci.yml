@@ -138,6 +138,81 @@ jobs:
       - name: Every control is load-bearing
         run: uv run python scripts/plant_breaches.py
 
+  container:
+    name: The container boots, migrates and defends itself
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aab
+          POSTGRES_PASSWORD: aab_ci_ephemeral
+          POSTGRES_DB: aab_container
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aab -d aab"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      # A throwaway container on the runner's loopback, destroyed with the job. The password is
+      # here on purpose: it is not a credential, and pretending it is would teach the wrong lesson
+      # about which values in this repository actually matter.
+      AAB_POSTGRES_DSN: postgresql://aab:aab_ci_ephemeral@localhost:5432/aab_container
+      AAB_ENVIRONMENT: ci
+      AAB_RESOURCE_SERVER_URL: https://broker.example/mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+
+      # ADR-005: the entrypoint was certified against *stubbed binaries*, and that is how it
+      # shipped for days calling a module which has never existed -- under `set -eu`, so the
+      # container could not have booted. A stub cannot fail. This builds the real image and runs
+      # it, so the migrate-then-serve path is executed rather than described.
+      - name: Build the image
+        run: docker build -t aab:ci .
+
+      - name: Boot it against real PostgreSQL
+        run: |
+          APPROVER="$(python -c 'import secrets;print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$APPROVER"
+          echo "AAB_APPROVER_TOKEN=$APPROVER" >> "$GITHUB_ENV"
+          docker run -d --name aab --network host \
+            -e PORT=8000 \
+            -e AAB_ENVIRONMENT=staging \
+            -e AAB_POSTGRES_DSN='postgresql://aab:aab_ci_ephemeral@localhost:5432/aab_container' \
+            -e AAB_RESOURCE_SERVER_URL='http://localhost:8000/mcp' \
+            -e AAB_APPROVER_TOKEN="$APPROVER" \
+            -e AAB_CORS_ALLOW_ORIGINS='[]' \
+            -e AAB_RATE_LIMIT_PER_MINUTE=10 \
+            aab:ci
+          for i in $(seq 1 60); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/healthz)" = 200 ]; then
+              echo "healthy after ${i}s"; break
+            fi
+            sleep 1
+          done
+          docker logs aab
+          curl -sf http://localhost:8000/healthz > /dev/null
+          curl -sf http://localhost:8000/readyz
+
+      # Every boundary, over the wire, against a server this step did not start in-process.
+      # Effects are counted out of `irreversible_effect`; a client-side message grades nothing.
+      - name: Every boundary holds over HTTP
+        run: |
+          uv run python scripts/deployed_smoke.py \
+            --base-url http://localhost:8000 --rate-limit 10 \
+            --label 'container build, GitHub Actions runner' \
+            --out "$RUNNER_TEMP/smoke.json"
+
+      - name: Stop it
+        if: always()
+        run: docker rm -f aab || true
+
   console:
     name: Console lint, type check, test and build
     runs-on: ubuntu-latest

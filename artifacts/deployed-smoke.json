@@ -1,0 +1,197 @@
+{
+  "generated_at": "2026-09-19T07:53:56+00:00",
+  "instance": "container build of this repository, run locally against PostgreSQL 16 (NOT a hosted deployment)",
+  "public_api_url": "http://localhost:8099",
+  "deployed_revision": "(not reported by the deployment)",
+  "environment": "staging",
+  "resource_server_url": "http://localhost:8099/mcp",
+  "mcp": {
+    "server": "agent-authz-broker 0.1.0",
+    "protocol": "2025-11-25",
+    "tools": [
+      "flag_account",
+      "issue_credit",
+      "ping",
+      "read_account",
+      "read_approval",
+      "request_approval"
+    ]
+  },
+  "tool_list_is_exactly_the_six": true,
+  "approver_credential_supplied": true,
+  "rate_limit_per_minute_configured": 10,
+  "scenarios": [
+    {
+      "scenario": "positive_path",
+      "note": "correct audience, attenuated scope, matching approval",
+      "detail": {
+        "transport": "accepted",
+        "decision": "allowed",
+        "reason": null,
+        "effect_id_present": true
+      },
+      "effects_caused": 1,
+      "effects_allowed": 1,
+      "pass": true
+    },
+    {
+      "scenario": "permitted_read",
+      "note": "a reversible tool inside the effective scope",
+      "detail": {
+        "transport": "accepted",
+        "decision": "allowed",
+        "reason": null,
+        "effect_id_present": false
+      },
+      "effects_caused": 0,
+      "effects_allowed": 0,
+      "pass": true
+    },
+    {
+      "scenario": "A_wrong_audience",
+      "note": "valid signature, minted for another resource server",
+      "detail": {
+        "transport": "refused",
+        "error": "ExceptionGroup"
+      },
+      "effects_caused": 0,
+      "effects_allowed": 0,
+      "pass": true
+    },
+    {
+      "scenario": "B_scope_amplification",
+      "note": "leaf claims a scope its delegator never had",
+      "detail": {
+        "transport": "accepted",
+        "decision": "denied",
+        "reason": "insufficient_effective_scope",
+        "effect_id_present": false
+      },
+      "effects_caused": 0,
+      "effects_allowed": 0,
+      "pass": true
+    },
+    {
+      "scenario": "H_expired",
+      "note": "a token past its expiry",
+      "detail": {
+        "transport": "refused",
+        "error": "ExceptionGroup"
+      },
+      "effects_caused": 0,
+      "effects_allowed": 0,
+      "pass": true
+    },
+    {
+      "scenario": "H_bad_signature",
+      "note": "signed with a key this server does not trust",
+      "detail": {
+        "transport": "refused",
+        "error": "ExceptionGroup"
+      },
+      "effects_caused": 0,
+      "effects_allowed": 0,
+      "pass": true
+    },
+    {
+      "scenario": "H_garbage_bearer",
+      "note": "a bearer string that is not a token at all",
+      "detail": {
+        "transport": "refused",
+        "error": "ExceptionGroup"
+      },
+      "effects_caused": 0,
+      "effects_allowed": 0,
+      "pass": true
+    },
+    {
+      "scenario": "C_no_approval",
+      "note": "everything correct except that no human approved",
+      "detail": {
+        "transport": "accepted",
+        "decision": "denied",
+        "reason": "approval_required",
+        "effect_id_present": false
+      },
+      "effects_caused": 0,
+      "effects_allowed": 0,
+      "pass": true
+    },
+    {
+      "scenario": "D_agent_token_cannot_grant_approval",
+      "note": "a valid, correctly attenuated agent token presented to the approver route",
+      "detail": {
+        "no_credential": 401,
+        "agent_token": 401,
+        "approver_credential": 201
+      },
+      "effects_caused": 0,
+      "effects_allowed": 0,
+      "pass": true
+    },
+    {
+      "scenario": "F_one_approval_two_concurrent_calls",
+      "note": "exactly one effect, whichever call wins",
+      "detail": {
+        "outcomes": [
+          {
+            "transport": "accepted",
+            "decision": "allowed",
+            "reason": null,
+            "effect_id_present": true
+          },
+          {
+            "transport": "accepted",
+            "decision": "denied",
+            "reason": "approval_required",
+            "effect_id_present": false
+          }
+        ],
+        "approvals_drained_first": 1
+      },
+      "effects_caused": 1,
+      "effects_allowed": 1,
+      "pass": true
+    },
+    {
+      "scenario": "G_replay_consumed_approval",
+      "note": "the same token and the same spent approval, presented again",
+      "detail": {
+        "transport": "accepted",
+        "decision": "denied",
+        "reason": "approval_required",
+        "effect_id_present": false
+      },
+      "effects_caused": 0,
+      "effects_allowed": 0,
+      "pass": true
+    },
+    {
+      "scenario": "rate_limit",
+      "note": "11 further calls against a ceiling of 10 per (subject, tool, 60s window). `allowed` is normally one short of the ceiling because `permitted_read` above already spent a unit of this exact bucket -- which is the window being shared across the whole run, as a window should be. The guarantee is an upper bound, so that is what is asserted.",
+      "detail": {
+        "configured_limit": 10,
+        "calls_made": 11,
+        "allowed": 9,
+        "final_decision": "denied",
+        "final_reason": "rate_limited"
+      },
+      "effects_caused": 0,
+      "effects_allowed": 0,
+      "pass": true
+    }
+  ],
+  "audit": {
+    "rows_before": 0,
+    "rows_after": 24,
+    "transport_refusals_recorded": 4,
+    "transport_refusal_reasons": [
+      "audience_mismatch",
+      "signature_invalid",
+      "token_expired",
+      "token_malformed"
+    ],
+    "unauthenticated_rows_claim_no_subject": true
+  },
+  "all_scenarios_pass": true
+}

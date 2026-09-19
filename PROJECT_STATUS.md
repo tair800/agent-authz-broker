@@ -69,7 +69,7 @@ Plus: `read_approval` writes no audit row (now stated, and rule 6 scoped to *dec
 token mint is open on non-production instances (now disclosed), and `make help` advertised five
 breaches while the script plants ten.
 
-`make breaches` replants **all ten** and requires each one's tests to fail. Verified: 10 of 10 —
+`make breaches` replants **all eleven** and requires each one's tests to fail. Verified: 11 of 11 —
 **and it now runs in CI**, alongside a gate that re-measures the matrix and fails if any published
 number stops reproducing. Those were the two load-bearing claims with no independent execution.
 
@@ -80,8 +80,9 @@ number stops reproducing. Those were the two load-bearing claims with no indepen
 | Layer | State |
 |---|---|
 | Console (Vercel Hobby) | **Live** — <https://agent-authz-broker.vercel.app>, serving the committed artifacts because `BROKER_API_BASE_URL` is unset there |
-| Resource server (Render) | **Not deployed.** `agent-authz-broker.onrender.com` returns 404 |
-| PostgreSQL (Neon) | **Not provisioned** |
+| Resource server (Render) | **Not deployed** — needs an owner account login |
+| PostgreSQL (Neon) | **Not provisioned** — needs an owner account login |
+| The container itself | **Built, booted and attacked on every CI push.** The `container` job builds the image, runs it against PostgreSQL 16, and drives every boundary through it over HTTP |
 
 `docs/deployment.md` §11 says exactly which claims were run and which were not.
 
@@ -101,9 +102,12 @@ number stops reproducing. Those were the two load-bearing claims with no indepen
 - **`GET /api/v1/demo/tokens` is open on any non-production instance.** Deliberate — it is the lab's
   front door — and harmless to the claim: approving needs `AAB_APPROVER_TOKEN`, which it does not
   mint.
-- **Not built:** Keycloak gap analysis, Redis rate limiting, OpenTelemetry/Langfuse, step-up
-  authorization, CIMD-vs-DCR, full RFC 9728/8707/9207 conformance suites. ADR-002 lists each, and
-  records that **rate limiting is now delivered nowhere in the portfolio**.
+- **Not built:** Keycloak gap analysis, OpenTelemetry/Langfuse, step-up authorization,
+  CIMD-vs-DCR, full RFC 9728/8707/9207 conformance suites. ADR-002 lists each.
+- **Rate limiting IS built** (ADR-006), in PostgreSQL rather than the blueprint's Redis:
+  `(verified subject, tool, fixed 60-second window)`, default 30. Fixed windows, so the worst
+  case across an arbitrary minute is twice the limit; **not DDoS protection**; and not part of
+  the security claim — removing it admits no extra attack in the kill test.
 
 ---
 
@@ -112,7 +116,7 @@ number stops reproducing. Those were the two load-bearing claims with no indepen
 ```bash
 make gate         # lint, types, offline suite
 make killtest     # the adversarial suite against real PostgreSQL
-make breaches     # replant all ten breaches; each must turn its own tests red
+make breaches     # replant all eleven breaches; each must turn its own tests red
 make matrix-gate  # prove every published number still reproduces from a fresh run
 make matrix       # measure the security matrix and every console artifact
 make api          # the MCP server + console API on :8000

@@ -67,8 +67,8 @@ Authorization is deterministic code. An agent may ask for anything; what it gets
 
 ### 9. A guard that cannot fail is not a guard
 
-Every control must be shown to be load-bearing by removing it and watching a test go red. All ten
-are a script — `make breaches` — not a table in a document. See ADR-003, ADR-004 and ADR-005.
+Every control must be shown to be load-bearing by removing it and watching a test go red. All eleven
+are a script — `make breaches` — not a table in a document. See ADR-003 through ADR-006.
 
 A guard that *cannot* fire is a subtler version of the same thing: the `RecursionError` catch in
 `tokens.py` is unreachable behind the size cap, so it is tested with the cap lifted and labelled as
@@ -102,9 +102,10 @@ run and is reproducible with `make`.
 make gate        # lint, types, offline suite
 make matrix-gate # re-measure and prove every published number still reproduces
 make killtest    # the adversarial suite against real PostgreSQL
-make breaches    # replant all ten breaches; each must turn its tests red
+make breaches    # replant all eleven breaches; each must turn its tests red
 make matrix      # measure the security matrix and every console artifact
 make api         # the MCP server + console API
+make smoke BASE=<url>  # every boundary, over HTTP, against a running instance
 uv run python -m agent_authz_broker.demo   # measure the security matrix
 uv run python scripts/mcp_smoke.py         # real MCP client over Streamable HTTP
 ```

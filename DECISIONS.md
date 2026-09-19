@@ -174,7 +174,7 @@ adversarial suite, and the naive-versus-hardened comparison — that is, the who
 | Blueprint item | Status |
 |---|---|
 | Self-hosted Keycloak + RFC gap analysis | **Not built.** A deterministic test authority signs tokens with real keys. This repository is a **resource server**; it is not an authorization server and does not pretend to be one. |
-| Redis rate limiting | **Not built.** |
+| Redis rate limiting | **Superseded by ADR-006.** Rate limiting is built, in PostgreSQL rather than Redis. Adding a service for one integer is the habit that ADR worked against. |
 | OpenTelemetry + Langfuse | **Not built.** |
 | Step-up authorization on 403 | **Not built.** |
 | CIMD vs DCR analysis | **Not built.** |
@@ -184,8 +184,9 @@ adversarial suite, and the naive-versus-hardened comparison — that is, the who
 **The portfolio consequence, recorded rather than absorbed:** the portfolio's skill matrix (again a
 private planning document) makes project 4 the **sole home** of *MCP server design*,
 *OAuth 2.1 / authn / authz*, *rate limiting* and *API security*.
-MCP and resource-server authorization are delivered. **Rate limiting is now delivered nowhere in the
-portfolio** and that row must be corrected or re-homed.
+MCP and resource-server authorization are delivered. **Rate limiting was, when this ADR was
+written, delivered nowhere in the portfolio.** ADR-006 closes it: it is built here, in PostgreSQL
+rather than Redis, and proven by `tests/test_rate_limit.py` and breach 11.
 
 ---
 
@@ -406,3 +407,81 @@ scope for reversible reads is not detected here.
 **Two load-bearing claims still have no independent execution**: `make breaches` and `make matrix`
 run nowhere but on a developer's machine. Both now run in CI — `matrix` against a stable-field gate
 rather than a byte diff, because every run mints fresh ids — which is what closes it.
+
+---
+
+## ADR-006 — Rate limiting: required, and what it is
+
+**Status:** accepted, 2026-09-19.
+
+### Was it required? The sources, not an opinion
+
+| Source | What it says |
+|---|---|
+| `SKILL_MATRIX.md` legend | `●` load-bearing · **`○` present and real, but secondary** · blank = absent by design |
+| `SKILL_MATRIX.md`, *Rate limiting* row | `○` in **project 4's column only**. No other project carries it |
+| `SKILL_MATRIX.md`, gaps table | *"NOT delivered: rate limiting — project 4 shipped without it (ADR-002), so that row is now empty portfolio-wide and must be re-homed"* |
+| `PORTFOLIO_BLUEPRINT.md`, project 4 **Major features** | *"…full audit trail · rate limiting"* |
+| `PORTFOLIO_BLUEPRINT.md`, project 4 **Tests** | *"…durable-approval kill/resume test · **rate-limit tests**"* |
+
+So: **required, and required to be proven by a test** — but `○`, which the legend defines as secondary
+rather than load-bearing. Both halves matter. It had to exist; it must not be described as part of
+the security claim. ADR-002 recorded it as not built and flagged the row as empty portfolio-wide,
+which is an open gap rather than a decision. This closes it.
+
+**It is not load-bearing and the README does not imply it is.** No rate limit stops a caller who
+holds authority it should not have. That is the audience check, the attenuation rule and the approval
+gate. Removing the limiter entirely would not admit a single extra attack in the kill test.
+
+### What is limited
+
+> **(verified subject, tool, fixed 60-second window)** — at most `AAB_RATE_LIMIT_PER_MINUTE` calls,
+> default 30, `0` disables it.
+
+- **The subject is the verified one**, never a value the caller supplied, so a caller cannot move
+  itself into a fresh bucket by asking differently.
+- **The bucket is the primary key** `(subject, tool, window_start)`. Two subjects cannot share one
+  and neither can two tools, because there is no row for them to share.
+- **Counted only for calls that were going to be allowed.** Counting refusals would let an attacker
+  exhaust a *legitimate* subject's allowance by spraying its name at a tool it cannot use: the
+  refusal is free to produce and the denial of service would land on the victim. Refusals are
+  recorded in the audit trail, which is where a pattern of them belongs.
+- **Claimed inside the transaction that writes the effect**, so a call that rolls back does not
+  spend quota it never used.
+
+### PostgreSQL, not Redis and not a dict
+
+The blueprint said Redis. There is no Redis here, and adding one for a counter would be the habit the
+owner's brief explicitly warned against — a whole service, on a free plan, for one integer.
+
+An in-process counter was the other candidate and is worse than it looks. It states a bound *per
+worker*: "30 per minute" behind N workers is 30 × N, and the deployment that exposes it is the one
+nobody ran. That is the same reasoning as one-approval-one-effect, and it lands the same way — a
+single `INSERT … ON CONFLICT DO UPDATE … RETURNING count`, atomic, so concurrent callers are
+serialised by the row lock and each receives a distinct position. The entrypoint runs one worker
+today; the bound does not depend on that staying true.
+
+### The weaknesses, stated
+
+- **Fixed window, not sliding.** A caller may spend a whole allowance at the end of one window and
+  another at the start of the next, so the worst case across an arbitrary 60 seconds is **twice** the
+  limit. A sliding window costs a row per request; this costs one row per bucket. The bound promised
+  is *at most `limit` per fixed window*, and that is the bound the tests assert.
+- **This is not DDoS protection and is not offered as any.** It bounds an *authenticated* caller.
+  Volume that never presents a usable token is refused earlier by the verifier, and volume large
+  enough to matter is a platform concern this application cannot address.
+- **It is a ceiling, not fairness.** One subject inside its allowance can still crowd a free
+  instance.
+
+### Proven by
+
+`tests/test_rate_limit.py`, against real PostgreSQL: below the limit succeeds · above it is denied
+with **zero irreversible effects** · independent subjects do not share a bucket · the window recovers
+· **ten concurrent calls against a ceiling of three produce exactly three effects** · `0` disables the
+ceiling rather than refusing everything.
+
+Breach **11** plants read-then-write — the plausible wrong implementation, which looks correct and
+leaks under exactly the concurrency the bound is quoted for.
+
+Live over HTTP against the container build, in `artifacts/deployed-smoke.json`: eleven calls against
+a ceiling of ten, final call `rate_limited`, zero effects.

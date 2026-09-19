@@ -66,6 +66,12 @@ services:
       - key: AAB_CORS_ALLOW_ORIGINS
         value: '["https://agent-authz-broker.vercel.app"]'
 
+      # The ceiling on how often one verified subject may call one tool, per fixed 60-second
+      # window. Counted in PostgreSQL rather than in the process, so the bound does not depend on
+      # how many workers happen to be running -- see DECISIONS.md ADR-006. Not DDoS protection.
+      - key: AAB_RATE_LIMIT_PER_MINUTE
+        value: 30
+
       # ---- secrets: set in the Render dashboard, never in this file -----------------------
       # `sync: false` means Render prompts for the value on first apply and stores it encrypted.
       # The value never enters the repository, this blueprint, or a build log.

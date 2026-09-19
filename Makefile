@@ -13,7 +13,10 @@ PG_PORT := 15434
 DSN := postgresql://aab:aab_local_dev@localhost:$(PG_PORT)/aab
 AUD := http://localhost:8000/mcp
 
-.PHONY: help install fmt lint types test gate db-up migrate killtest breaches matrix matrix-gate api clean
+# For `make smoke`. RATE_LIMIT must match what the instance is configured with.
+RATE_LIMIT ?= 30
+
+.PHONY: help install fmt lint types test gate db-up migrate killtest breaches matrix matrix-gate smoke api clean
 
 help: ## List the targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -56,7 +59,7 @@ killtest: migrate ## THE ADVERSARIAL SUITE. Every count comes from irreversible_
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) \
 	  uv run pytest -m integration
 
-breaches: migrate ## Replant all ten planted breaches; each must turn its own tests red
+breaches: migrate ## Replant all eleven planted breaches; each must turn its own tests red
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) 	  uv run python scripts/plant_breaches.py
 
 matrix-gate: migrate ## Re-measure and prove every committed number still reproduces
@@ -69,6 +72,9 @@ matrix: migrate ## Measure the security matrix and write every console artifact
 # Forwarded, never defaulted. A value here would be a committed credential for granting
 # approvals, and an empty one is read as unset (see config.py), so POST /api/v1/approvals
 # is simply unavailable unless you export this yourself before running the target.
+smoke: ## Drive every boundary against a RUNNING instance. BASE=<url> and AAB_APPROVER_TOKEN required.
+	uv run python scripts/deployed_smoke.py --base-url $(BASE) --rate-limit $(RATE_LIMIT)
+
 api: migrate ## Serve the MCP server and the console API
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) \
 	  AAB_APPROVER_TOKEN="$(AAB_APPROVER_TOKEN)" \

@@ -261,13 +261,22 @@ assemble the list themselves.
 - Removing `LICENSE` from the build context does fail the build with
   `OSError: License file does not exist: LICENSE`, which is why the Dockerfile copies it beside
   the manifest. That comment is a reproduced result, not folklore.
-- The entrypoint is `sh`-compatible and stops with a non-zero exit before starting uvicorn when
-  `alembic upgrade head` fails. **Read the scope of that claim carefully:** it was exercised against
-  *stubbed binaries* in the image, so what was proven is that the shell's control flow is right —
-  not that the commands it runs exist. A stub cannot fail, and that is exactly how the entrypoint
-  shipped for days calling `agent_authz_broker.demo.seed`, a module that has never existed in any
-  commit, under `set -eu` with `AAB_ENVIRONMENT=staging`. The seed step is gone (§4); this bullet
-  is left narrower rather than deleted, because the lesson is the narrowing.
+- **The container is built and run, on every CI push, with no stubs at all.** The `container` job
+  builds the image, starts it against a real PostgreSQL 16 service, waits for `/healthz`, checks
+  `/readyz`, and then drives every security boundary through it over HTTP with
+  `scripts/deployed_smoke.py`. The entrypoint's migrate-then-serve sequence therefore executes on
+  every push rather than being described.
+
+  **This bullet used to read differently, and the change is the point.** It certified the entrypoint
+  as *"exercised against stubbed binaries in the image: it seeds when `AAB_ENVIRONMENT` is unset"* —
+  and the stub was a `python` that always succeeded. A stub cannot fail. That is exactly how the
+  entrypoint shipped for days calling `agent_authz_broker.demo.seed`, a module that has never existed
+  in any commit, under `set -eu` with `AAB_ENVIRONMENT=staging`: the container could not have booted
+  and nothing said so. The seed step is gone (§4) and the stub is gone with it.
+
+  The fail-closed property is now demonstrated rather than asserted, and was demonstrated by
+  accident first: pointed at a database whose tables existed without an `alembic_version` stamp, the
+  real image exited **1** on the migration and never reached uvicorn.
 - `render.yaml` and the CI workflow parse. The secret scan's four patterns catch a private-key
   block, a committed reset or approver token and a JWT literal, and match nothing in this
   repository including the workflow that defines them.

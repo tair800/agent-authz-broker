@@ -11,6 +11,9 @@ This is an MCP resource server that checks all three, and a suite that proves ea
 load-bearing by removing it and watching the tests go red.
 
 **Live console: <https://agent-authz-broker.vercel.app>**
+**Live MCP/API: not deployed.** Render and Neon need an owner login this build could not perform —
+see [Deployment status](#deployment-status). The container is built and exercised on every CI run,
+and [`artifacts/deployed-smoke.json`](artifacts/deployed-smoke.json) is that run's evidence.
 
 ---
 
@@ -94,7 +97,7 @@ concurrency test and fail behind two workers, so there is no lock in this reposi
 
 ---
 
-## The adversarial review: ten breaches planted, ten caught
+## The adversarial review: eleven breaches planted, eleven caught
 
 A suite that has never failed is not evidence the system is safe. Each control was removed in turn
 and the suite re-run.
@@ -111,6 +114,7 @@ and the suite re-run.
 | `verify_token` stops catching `RecursionError` | the parse test **failed**, as a raw crash |
 | `pytest.mark.skip` on the whole kill test | the session **refused to start** |
 | one scenario stops reading its effect count from the database | the predeclaration guard **failed** |
+| the rate-limit claim becomes read-then-write | two rate-limit tests **failed** |
 
 Breach 3 is the informative one: removing the application-level guard did not produce a wrong
 answer, it produced a constraint violation. The database refused the second effect on its own, which
@@ -130,7 +134,7 @@ zero of the seventeen kill tests ran. It now asks pytest what it is about to run
 source. The same review found the container entrypoint calling a module that has never existed —
 [ADR-005](DECISIONS.md).
 
-**Re-run it yourself — the table is a script, and CI runs it.** `make breaches` replants all ten
+**Re-run it yourself — the table is a script, and CI runs it.** `make breaches` replants all eleven
 against your checkout, requires the named tests to fail each time, restores every file, and exits
 non-zero if any control turns out not to be load-bearing. All controls restored; **51 tests
 green**.
@@ -212,10 +216,36 @@ be silent, which meant the trail was blind to precisely the attacks above.
   live token within its scope for reversible reads. See [`docs/threat-model.md`](docs/threat-model.md).
 - **Everything is synthetic.** Invented accounts, invented balances, no payment rail, no external
   call. The "irreversible effect" is a row in a demonstration table.
-- **Not built:** the blueprint's Keycloak gap analysis, Redis rate limiting, OpenTelemetry/Langfuse,
-  step-up authorization, CIMD-vs-DCR, and the full RFC 9728/8707/9207 conformance suites.
-  [ADR-002](DECISIONS.md) lists each one and records that rate limiting is now delivered nowhere in
-  the portfolio.
+- **The rate limit is a ceiling, not a defence.** `(verified subject, tool, fixed 60-second window)`,
+  default 30, counted in PostgreSQL so the bound does not depend on how many workers are running.
+  Fixed windows, so the worst case across an arbitrary minute is **twice** the limit. **It is not
+  DDoS protection** and is not part of the security claim: remove it and the kill test admits not one
+  extra attack. [ADR-006](DECISIONS.md) says why it is here at all.
+- **Not built:** the blueprint's Keycloak gap analysis, OpenTelemetry/Langfuse, step-up
+  authorization, CIMD-vs-DCR, and the full RFC 9728/8707/9207 conformance suites.
+  [ADR-002](DECISIONS.md) lists each one.
+
+---
+
+## Deployment status
+
+| Layer | State |
+|---|---|
+| Console — Vercel Hobby | **Live**, <https://agent-authz-broker.vercel.app>, rendering the committed artifacts |
+| MCP resource server — Render Free | **Not deployed** |
+| PostgreSQL — Neon Free | **Not provisioned** |
+
+Both need an account login, so the hosting step is the owner's. **Everything that does not need the
+account is done and checked**: the image builds, the entrypoint migrates to head and serves, and
+`scripts/deployed_smoke.py` drives every boundary below against that running container over HTTP —
+counting effects out of `irreversible_effect`, not from what a tool call says about itself. CI builds
+the image and runs exactly that, so the deployment is exercised on every push rather than described.
+
+Point the same script at a Render URL when one exists and it produces the same artifact:
+
+```bash
+AAB_APPROVER_TOKEN=... uv run python scripts/deployed_smoke.py --base-url https://your-host
+```
 
 ---
 
