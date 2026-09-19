@@ -392,6 +392,24 @@ verifier now writes the row itself, with no subject and no token id when the tok
 authenticate — recording the identity it *claimed* would be the trail repeating an attacker's
 assertion as though the server had checked it. Breach 7 plants the removal.
 
+**Volume, and what bounds it.** One verified subject may call one tool at most
+`AAB_RATE_LIMIT_PER_MINUTE` times (default 30) per fixed 60-second window, counted in PostgreSQL by
+an atomic upsert so the bound does not depend on how many workers are running. The bucket is the
+primary key `(subject, tool, window_start)`, so one caller cannot exhaust another's allowance —
+which matters, because a limiter keyed on something an attacker controls is a denial-of-service
+anyone can aim at anyone. Only calls that were going to be *allowed* are counted, for the same
+reason: refusals are free to produce, and charging them to the named subject would let an attacker
+lock out a victim by spraying its name at a tool it cannot use.
+
+**It is not DDoS protection and is not offered as any.** It bounds an *authenticated* caller
+reaching the decision path. Volume that never presents a usable token is refused earlier by the
+verifier, and volume large enough to matter is a platform concern this application cannot address.
+Two further limits are stated rather than rounded away: the window is **fixed**, so the worst case
+across an arbitrary 60 seconds is **twice** the limit; and a ceiling is not fairness — one subject
+inside its allowance can still crowd a free instance. **Nothing in the security claim rests on it:**
+removing the limiter entirely admits not one extra attack in the kill test. ADR-006 has the sources
+that made it required and the reasons for each choice.
+
 **The demo token mint is open on any non-production instance.** `GET /api/v1/demo/tokens` returns
 five signed bearer tokens for this resource server — valid, wrong-audience, scope-amplifying,
 expired, forged — to any anonymous caller, and its only gate is `AAB_ENVIRONMENT == "production"`,
