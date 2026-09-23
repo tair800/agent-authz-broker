@@ -59,7 +59,7 @@ killtest: migrate ## THE ADVERSARIAL SUITE. Every count comes from irreversible_
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) \
 	  uv run pytest -m integration
 
-breaches: migrate ## Replant all eleven planted breaches; each must turn its own tests red
+breaches: migrate ## Replant all twelve planted breaches; each must turn its own tests red
 	AAB_POSTGRES_DSN=$(DSN) AAB_ENVIRONMENT=local AAB_RESOURCE_SERVER_URL=$(AUD) 	  uv run python scripts/plant_breaches.py
 
 matrix-gate: migrate ## Re-measure and prove every committed number still reproduces

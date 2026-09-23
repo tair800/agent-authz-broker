@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-09-19T07:53:56+00:00",
-  "instance": "container build of this repository, run locally against PostgreSQL 16 (NOT a hosted deployment)",
-  "public_api_url": "http://localhost:8099",
-  "deployed_revision": "(not reported by the deployment)",
+  "generated_at": "2026-09-23T19:20:24+00:00",
+  "instance": "Render Free (Frankfurt, Docker) + Neon Free PostgreSQL 16 (aws eu-central-1)",
+  "public_api_url": "https://agent-authz-broker.onrender.com",
+  "deployed_revision": "2570da2c5f09e8f8335f1b5d36e72208b32d5038",
   "environment": "staging",
-  "resource_server_url": "http://localhost:8099/mcp",
+  "resource_server_url": "https://agent-authz-broker.onrender.com/mcp",
   "mcp": {
     "server": "agent-authz-broker 0.1.0",
     "protocol": "2025-11-25",
@@ -19,7 +19,7 @@
   },
   "tool_list_is_exactly_the_six": true,
   "approver_credential_supplied": true,
-  "rate_limit_per_minute_configured": 10,
+  "rate_limit_per_minute_configured": 30,
   "scenarios": [
     {
       "scenario": "positive_path",
@@ -136,15 +136,15 @@
         "outcomes": [
           {
             "transport": "accepted",
-            "decision": "allowed",
-            "reason": null,
-            "effect_id_present": true
-          },
-          {
-            "transport": "accepted",
             "decision": "denied",
             "reason": "approval_required",
             "effect_id_present": false
+          },
+          {
+            "transport": "accepted",
+            "decision": "allowed",
+            "reason": null,
+            "effect_id_present": true
           }
         ],
         "approvals_drained_first": 1
@@ -168,11 +168,12 @@
     },
     {
       "scenario": "rate_limit",
-      "note": "11 further calls against a ceiling of 10 per (subject, tool, 60s window). `allowed` is normally one short of the ceiling because `permitted_read` above already spent a unit of this exact bucket -- which is the window being shared across the whole run, as a window should be. The guarantee is an upper bound, so that is what is asserted.",
+      "note": "35 further calls, down one MCP session, against a ceiling of 30 per (subject, tool, 60s window). `allowed` is normally short of the ceiling because `permitted_read` above already spent a unit of this exact bucket -- the window is shared across the whole run, as a window should be. The guarantee is an upper bound, so that is what is asserted: some call was refused, none exceeded the ceiling, no effects.",
       "detail": {
-        "configured_limit": 10,
-        "calls_made": 11,
-        "allowed": 9,
+        "configured_limit": 30,
+        "calls_made": 35,
+        "allowed": 30,
+        "refused_as_rate_limited": 5,
         "final_decision": "denied",
         "final_reason": "rate_limited"
       },
@@ -182,9 +183,9 @@
     }
   ],
   "audit": {
-    "rows_before": 0,
-    "rows_after": 24,
-    "transport_refusals_recorded": 4,
+    "rows_before": 44,
+    "rows_after": 92,
+    "transport_refusals_recorded": 8,
     "transport_refusal_reasons": [
       "audience_mismatch",
       "signature_invalid",

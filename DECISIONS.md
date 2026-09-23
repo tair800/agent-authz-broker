@@ -485,3 +485,73 @@ leaks under exactly the concurrency the bound is quoted for.
 
 Live over HTTP against the container build, in `artifacts/deployed-smoke.json`: eleven calls against
 a ceiling of ten, final call `rate_limited`, zero effects.
+
+---
+
+## ADR-007 — The deployment, and the defect only a deployment could find
+
+**Status:** accepted, 2026-09-23.
+
+Three layers, all free: Vercel Hobby (`fra1`) for the console, Render Free (Frankfurt, Docker) for
+the MCP resource server, Neon Free (`aws eu-central-1`, PostgreSQL **16**, pooled) for the database.
+Postgres 16 because that is the version CI validates; the pooled endpoint because
+`db/engine.py` already detects `-pooler.` and disables the prepared-statement cache for it.
+
+### The first live instance refused every MCP client
+
+`421 Misdirected Request — Invalid Host header`, on every request to `/mcp`.
+
+The MCP SDK enables DNS-rebinding protection by default, and with no allowlist configured it permits
+**localhost only**. Nothing in this repository could have caught it:
+
+| Check | Host it used |
+|---|---|
+| the offline and integration suites | in-process, no HTTP |
+| `scripts/mcp_smoke.py` | `localhost:8000` |
+| the `container` CI job — builds the image, boots it, drives every boundary over HTTP | `localhost:8000` |
+| `scripts/deployed_smoke.py` against the local container | `localhost:8099` |
+
+**Every one of them satisfies exactly the default that was broken.** The container job was added in
+ADR-005 precisely because the entrypoint had only ever been checked against stubs — and it still
+could not see this, because a container on localhost is still localhost. It took a real hostname.
+
+**Closed by deriving the allowlist from `AAB_RESOURCE_SERVER_URL`**, which is already the one value
+that must equal the public address, because it is the whole of the audience check. A correct
+audience and a reachable transport can no longer disagree. Localhost patterns stay for local runs.
+
+Two tests, and the first one had to be fixed before it could fail. Written with no bearer token, it
+asserted `!= 421` and got `401` from the auth layer — which runs *before* the Host check — so it
+passed with the allowlist removed. **Breach 12 caught that**, which is the entire reason breaches
+are planted. Both now present a token the app itself minted, and both use a non-localhost host,
+because a test pointed at `localhost` passes against the very default that caused the outage.
+
+### What the public deployment proved that the local one could not
+
+`artifacts/deployed-smoke.json`, twelve scenarios, every effect count read from
+`irreversible_effect` over `/api/v1/effects` as a delta: positive path · permitted read · wrong
+audience · scope amplification · expired · forged · garbage bearer · no approval ·
+agent-token-cannot-grant · one approval with two concurrent calls → **exactly one effect** · replay ·
+rate limit (**35 calls, exactly 30 allowed, 5 refused**). The approver endpoint answers **401 / 401 /
+201**. The audit trail recorded **8** refusals made at the transport, and every unauthenticated row
+carries no subject.
+
+### The rate-limit probe had to be rewritten to be able to fail
+
+The first public run reported all 31 calls allowed. The probe was opening one MCP session per call,
+and against a free instance over the public internet that took **longer than the 60-second window** —
+so the window rolled and the ceiling was never reached. The limiter was correct and the client was
+slow. It bursts down a single session now. This is the second time this script has graded itself
+wrong and the second time counting from the database rather than from a response is what showed it.
+
+### Stated rather than smoothed over
+
+- **Render Free sleeps.** The first request after idle pays roughly a minute of cold start.
+- **The console does not read the live broker.** `BROKER_API_BASE_URL` stays unset on Vercel, so the
+  console renders the committed measurement and says so on every screen. Pointing a measurement UI
+  at a sleeping free instance would make it display hosting failures as if they were authorization
+  results.
+- **`/api/v1/demo/tokens` is open on this deployment**, because `AAB_ENVIRONMENT` is `staging` and
+  the lab has to be drivable. ADR-006 and the threat model explain why that is safe to say out loud:
+  approving needs `AAB_APPROVER_TOKEN`, which that endpoint does not mint.
+- **`AAB_ADMIN_RESET_TOKEN` is unset**, so `/admin/reset` does not exist on the deployment at all —
+  404 to an agent token and 404 to no credential.

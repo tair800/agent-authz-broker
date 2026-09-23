@@ -69,7 +69,7 @@ Plus: `read_approval` writes no audit row (now stated, and rule 6 scoped to *dec
 token mint is open on non-production instances (now disclosed), and `make help` advertised five
 breaches while the script plants ten.
 
-`make breaches` replants **all eleven** and requires each one's tests to fail. Verified: 11 of 11 —
+`make breaches` replants **all twelve** and requires each one's tests to fail. Verified: 12 of 12 —
 **and it now runs in CI**, alongside a gate that re-measures the matrix and fails if any published
 number stops reproducing. Those were the two load-bearing claims with no independent execution.
 
@@ -79,12 +79,22 @@ number stops reproducing. Those were the two load-bearing claims with no indepen
 
 | Layer | State |
 |---|---|
-| Console (Vercel Hobby) | **Live** — <https://agent-authz-broker.vercel.app>, serving the committed artifacts because `BROKER_API_BASE_URL` is unset there |
-| Resource server (Render) | **Not deployed** — needs an owner account login |
-| PostgreSQL (Neon) | **Not provisioned** — needs an owner account login |
+| Console (Vercel Hobby, `fra1`) | **Live** — <https://agent-authz-broker.vercel.app>, serving the committed artifacts because `BROKER_API_BASE_URL` is unset there |
+| Resource server (Render Free, Frankfurt, Docker) | **Live** — <https://agent-authz-broker.onrender.com>, `/mcp` over Streamable HTTPS |
+| PostgreSQL (Neon Free, `aws eu-central-1`) | **Live** — PostgreSQL **16**, pooled endpoint, `agent_authz_broker` |
 | The container itself | **Built, booted and attacked on every CI push.** The `container` job builds the image, runs it against PostgreSQL 16, and drives every boundary through it over HTTP |
 
+All free tier, zero cost. Render Free sleeps: the first request after idle pays roughly a minute of
+cold start. `artifacts/deployed-smoke.json` is the twelve-scenario run against the **public**
+deployment, effects counted from PostgreSQL.
+
 `docs/deployment.md` §11 says exactly which claims were run and which were not.
+
+**The deployment found a defect nothing local could.** The MCP SDK enables DNS-rebinding
+protection by default and, absent an allowlist, permits *localhost only* — so the first live
+instance answered `421 Misdirected Request / Invalid Host header` to every client while every
+test, the smoke script and the container CI job all passed, because all of them use localhost.
+The allowlist is derived from `AAB_RESOURCE_SERVER_URL` now, and breach 12 plants its removal.
 
 ---
 
@@ -116,7 +126,7 @@ number stops reproducing. Those were the two load-bearing claims with no indepen
 ```bash
 make gate         # lint, types, offline suite
 make killtest     # the adversarial suite against real PostgreSQL
-make breaches     # replant all eleven breaches; each must turn its own tests red
+make breaches     # replant all twelve breaches; each must turn its own tests red
 make matrix-gate  # prove every published number still reproduces from a fresh run
 make matrix       # measure the security matrix and every console artifact
 make api          # the MCP server + console API on :8000

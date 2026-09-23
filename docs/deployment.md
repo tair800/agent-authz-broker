@@ -2,11 +2,11 @@
 
 How this runs, what it costs, and which properties are true only because of the plan it runs on.
 
-**The console is deployed; the resource server is not.** `https://agent-authz-broker.vercel.app`
-answers, and renders the committed artifacts because `BROKER_API_BASE_URL` is unset there. Render
-and Neon have not been provisioned, so `https://agent-authz-broker.onrender.com/healthz` returns
-404 and no MCP client has connected to a deployed instance. Section 11 says exactly which of the
-claims below have been run and which have not.
+**All three layers are deployed, all on free plans.** The console at
+`https://agent-authz-broker.vercel.app`, the MCP resource server at
+`https://agent-authz-broker.onrender.com`, and Neon PostgreSQL **16** in `aws eu-central-1`.
+Section 11 says exactly which claims were run and which were not — worth reading, because the first
+live deployment refused every MCP client and no local check could have told anyone.
 
 ---
 
@@ -299,12 +299,28 @@ assemble the list themselves.
   answers 200, and each one states on its face that it is rendering committed artifacts rather than
   a live broker, because `BROKER_API_BASE_URL` is unset in that project.
 
-**Not verified:** the resource server has **not** been deployed. Render and Neon were never
-provisioned — `https://agent-authz-broker.onrender.com/healthz` returns 404 — so no MCP client has
-connected to a deployed instance, the entrypoint's migrate-then-serve sequence has never run
-against anything but stubbed binaries, and the ~50 s cold start is the platform's documented behaviour
-rather than a measurement of this service. The image build was exercised with a placeholder
-`alembic.ini`, because the real migration environment had not landed when this was written.
+- **The public deployment, driven by `scripts/deployed_smoke.py`** — results committed to
+  `artifacts/deployed-smoke.json`. The container boots on Render Free, both migrations reach head
+  against Neon, `/readyz` reports `postgres: healthy`, a real MCP client negotiates protocol
+  `2025-11-25` and sees exactly six tools, and **twelve scenarios pass**: the positive path, a
+  permitted read, wrong audience, scope amplification, expired, forged, garbage bearer, no approval,
+  agent-token-cannot-grant, one-approval-two-concurrent-calls, replay, and the rate limit (35 calls,
+  exactly 30 allowed, 5 refused `rate_limited`). Every effect count is read from
+  `irreversible_effect` through `/api/v1/effects`, **as a delta**, never from what a call reported
+  about itself.
+
+**The deployment immediately found what nothing local could.** The MCP SDK enables DNS-rebinding
+protection by default and, given no allowlist, permits **localhost only** — so the first live
+instance answered `421 Misdirected Request / Invalid Host header` to every client. Every test, the
+MCP smoke script, and the CI job that builds the container and drives it over HTTP had all passed,
+because every one of them uses `localhost` and therefore satisfies exactly that default. The
+allowlist is derived from `AAB_RESOURCE_SERVER_URL` now — already the one value that must equal the
+public address — so a correct audience and a reachable transport cannot disagree. Breach 12 plants
+its removal.
+
+**Not verified:** the ~50 s cold start is the platform's documented behaviour rather than a
+measurement of this service, and the image build was exercised with a placeholder `alembic.ini`
+because the real migration environment had not landed when that line was written.
 
 This paragraph previously read *"nothing here has been deployed to Render, Neon or Vercel"* while
 the README linked the live console. It was written before the console went up and nothing brought

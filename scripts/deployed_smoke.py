@@ -113,6 +113,33 @@ class Probe:
         except Exception as exc:  # a refusal at the transport arrives as an exception
             return {"transport": "refused", "error": type(exc).__name__}
 
+    async def burst(self, token: str, tool: str, arguments: dict[str, Any], n: int) -> list[Any]:
+        """`n` calls down **one** MCP session, as fast as the link allows.
+
+        The rate-limit probe cannot open a session per call: against a free instance over the
+        public internet that took longer than the 60-second window, so the window rolled and
+        the ceiling was never reached. All 31 calls came back `allowed` and the scenario
+        reported a failure that was really a slow client. One session, one handshake, N
+        round trips.
+        """
+        headers = {"Authorization": f"Bearer {token}"}
+        out: list[Any] = []
+        async with (
+            httpx.AsyncClient(headers=headers, timeout=90) as http,
+            streamable_http_client(f"{self.base}/mcp", http_client=http) as (read, write),
+            ClientSession(read, write) as session,
+        ):
+            await session.initialize()
+            for _ in range(n):
+                result = await session.call_tool(tool, arguments)
+                body = result.content[0].text if result.content else "{}"
+                try:
+                    outcome = json.loads(body).get("outcome", {})
+                except json.JSONDecodeError:
+                    outcome = {}
+                out.append({"decision": outcome.get("decision"), "reason": outcome.get("reason")})
+        return out
+
     async def initialize(self, token: str) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {token}"}
         async with (
@@ -343,27 +370,29 @@ async def main() -> int:
         # without saying so.
         if args.rate_limit > 0:
             before = await probe.effects()
-            outcomes = [
-                await probe.call(tokens["valid_request"], "read_account", {"account": "ACC-1"})
-                for _ in range(args.rate_limit + 1)
-            ]
+            outcomes = await probe.burst(
+                tokens["valid_request"], "read_account", {"account": "ACC-1"}, args.rate_limit + 5
+            )
             last = outcomes[-1]
             allowed = sum(1 for o in outcomes if o.get("decision") == "allowed")
+            limited = [o for o in outcomes if o.get("reason") == "rate_limited"]
             results.append(
                 {
                     "scenario": "rate_limit",
                     "note": (
-                        f"{args.rate_limit + 1} further calls against a ceiling of "
+                        f"{args.rate_limit + 5} further calls, down one MCP session, against a "
+                        f"ceiling of "
                         f"{args.rate_limit} per (subject, tool, 60s window). `allowed` is normally "
-                        "one short of the ceiling because `permitted_read` above already spent a "
-                        "unit of this exact bucket -- which is the window being shared across the "
-                        "whole run, as a window should be. The guarantee is an upper bound, so "
-                        "that is what is asserted."
+                        "short of the ceiling because `permitted_read` above already spent a unit "
+                        "of this exact bucket -- the window is shared across the whole run, as a "
+                        "window should be. The guarantee is an upper bound, so that is what is "
+                        "asserted: some call was refused, none exceeded the ceiling, no effects."
                     ),
                     "detail": {
                         "configured_limit": args.rate_limit,
                         "calls_made": len(outcomes),
                         "allowed": allowed,
+                        "refused_as_rate_limited": len(limited),
                         "final_decision": last.get("decision"),
                         "final_reason": last.get("reason"),
                     },
@@ -371,7 +400,7 @@ async def main() -> int:
                     "effects_allowed": 0,
                     "pass": (
                         allowed <= args.rate_limit
-                        and last.get("reason") == "rate_limited"
+                        and len(limited) > 0
                         and await probe.effects() - before == 0
                     ),
                 }
