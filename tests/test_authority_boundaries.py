@@ -320,6 +320,13 @@ async def _mcp_initialize(app: Any, *, host: str, token: str | None) -> httpx.Re
         )
 
 
+async def _minted_token(app: Any) -> str:
+    """A token this app's own authority signed, so a request can get past the bearer check."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="https://broker.test") as client:
+        return str((await client.get("/api/v1/demo/tokens")).json()["tokens"]["valid_request"])
+
+
 @pytest.mark.asyncio
 async def test_the_mcp_transport_accepts_the_host_this_server_is_configured_as() -> None:
     """The first real deployment answered `421 Misdirected Request / Invalid Host header`.
@@ -330,31 +337,28 @@ async def test_the_mcp_transport_accepts_the_host_this_server_is_configured_as()
     HTTP -- so all of them satisfied that default and none could see it. The deployed server
     refused every client with 421.
 
-    The allowlist is now derived from `AAB_RESOURCE_SERVER_URL`, already the one value that must
-    equal the public address. This test uses a **non-localhost** host on purpose: point it at
-    `localhost` and it passes against the very default that caused the outage.
+    Two things make this test able to fail, and it could not before either of them. It uses a
+    **non-localhost** host, because one pointed at `localhost` passes against the very default that
+    caused the outage. And it presents a **valid token**, because the bearer check runs first: the
+    anonymous version returned 401, satisfied `!= 421`, and reported success with the allowlist
+    removed. Breach 12 caught that, which is what breach 12 is for.
     """
     app = create_app(_settings())  # resource_server_url is https://broker.test/mcp
+    token = await _minted_token(app)
 
-    response = await _mcp_initialize(app, host="broker.test", token=None)
+    response = await _mcp_initialize(app, host="broker.test", token=token)
 
     assert response.status_code != 421, (
         f"the transport refused its own configured host: {response.text[:200]}"
     )
+    assert response.status_code == 200, f"{response.status_code} {response.text[:200]}"
 
 
 @pytest.mark.asyncio
 async def test_a_host_this_server_is_not_configured_as_is_still_refused() -> None:
-    """The guard is still a guard: widening it to the deployed host must not open it to any host.
-
-    Driven with a token the app itself minted, because the bearer check runs *before* the Host
-    check -- an anonymous request is refused 401 and never reaches the thing under test, which makes
-    the obvious version of this test pass against a server with no Host protection at all.
-    """
+    """The guard is still a guard: widening it to the deployed host must not open it to any host."""
     app = create_app(_settings())
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="https://broker.test") as client:
-        token = (await client.get("/api/v1/demo/tokens")).json()["tokens"]["valid_request"]
+    token = await _minted_token(app)
 
     response = await _mcp_initialize(app, host="attacker.invalid", token=token)
 
