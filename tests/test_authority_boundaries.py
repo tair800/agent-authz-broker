@@ -291,3 +291,71 @@ async def test_an_accepted_token_is_not_audited_here(lab: Any, engine: AsyncEngi
 
     assert await _verifier(engine, authority).verify_token(token) is not None
     assert await _count(engine) == 0
+
+
+# ------------------------------------------- 4. the transport is reachable at the deployed host
+#
+# Both tests run inside the app's lifespan. The MCP session manager raises "Task group is not
+# initialized" before it validates anything, so a test without the lifespan reaches neither the Host
+# check nor a useful answer -- it fails for a reason that has nothing to do with what it asserts.
+
+
+async def _mcp_initialize(app: Any, *, host: str, token: str | None) -> httpx.Response:
+    """POST an MCP initialize to `app`, addressed to `host`, with the lifespan running."""
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    transport = httpx.ASGITransport(app=app)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url=f"https://{host}") as client,
+    ):
+        return await client.post(
+            "/mcp",
+            headers=headers,
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_mcp_transport_accepts_the_host_this_server_is_configured_as() -> None:
+    """The first real deployment answered `421 Misdirected Request / Invalid Host header`.
+
+    The MCP SDK enables DNS-rebinding protection by default and, given no allowlist, permits
+    **localhost only**. Every check this repository had ever run was against `localhost` -- the
+    unit tests, the MCP smoke script, even the CI job that builds the container and drives it over
+    HTTP -- so all of them satisfied that default and none could see it. The deployed server
+    refused every client with 421.
+
+    The allowlist is now derived from `AAB_RESOURCE_SERVER_URL`, already the one value that must
+    equal the public address. This test uses a **non-localhost** host on purpose: point it at
+    `localhost` and it passes against the very default that caused the outage.
+    """
+    app = create_app(_settings())  # resource_server_url is https://broker.test/mcp
+
+    response = await _mcp_initialize(app, host="broker.test", token=None)
+
+    assert response.status_code != 421, (
+        f"the transport refused its own configured host: {response.text[:200]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_host_this_server_is_not_configured_as_is_still_refused() -> None:
+    """The guard is still a guard: widening it to the deployed host must not open it to any host.
+
+    Driven with a token the app itself minted, because the bearer check runs *before* the Host
+    check -- an anonymous request is refused 401 and never reaches the thing under test, which makes
+    the obvious version of this test pass against a server with no Host protection at all.
+    """
+    app = create_app(_settings())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="https://broker.test") as client:
+        token = (await client.get("/api/v1/demo/tokens")).json()["tokens"]["valid_request"]
+
+    response = await _mcp_initialize(app, host="attacker.invalid", token=token)
+
+    assert response.status_code == 421, f"{response.status_code} {response.text[:200]}"

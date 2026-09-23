@@ -26,9 +26,11 @@ import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -414,5 +416,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # client — and would have buried the RFC 9728 protected-resource metadata where no client looks
     # for it. Starlette matches in declaration order, so every route above wins first and only what
     # they do not claim reaches the MCP app.
-    app.mount("/", mcp.streamable_http_app())
+    # **The Host allowlist comes from this server's own identity**, which is what DNS-rebinding
+    # protection is for: only accept requests actually addressed to me. The SDK enables that
+    # protection by default and, given no allowlist, permits **localhost only** — so a deployed
+    # instance answers `421 Misdirected Request / Invalid Host header` to every client.
+    #
+    # That is exactly what the first real deployment did. Every prior check had been against
+    # `localhost`, including the container job, so nothing could have caught it: the allowlist the
+    # SDK defaults to is the one every local test happens to satisfy. `AAB_RESOURCE_SERVER_URL` was
+    # already the one value that must equal the public address — it is the whole of the audience
+    # check — so deriving the allowlist from it means a correct audience configuration and a
+    # reachable transport cannot disagree.
+    public = urlsplit(resolved.resource_server_url).netloc
+    app.mount(
+        "/",
+        mcp.streamable_http_app(
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=[public, f"{public}:*", "127.0.0.1:*", "localhost:*", "[::1]:*"],
+                allowed_origins=[
+                    f"https://{public}",
+                    f"http://{public}",
+                    "http://127.0.0.1:*",
+                    "http://localhost:*",
+                ],
+            )
+        ),
+    )
     return app

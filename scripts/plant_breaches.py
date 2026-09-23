@@ -197,6 +197,22 @@ BREACHES: tuple[Breach, ...] = (
             f"{RATELIMIT_TESTS}::test_concurrent_calls_cannot_exceed_the_documented_bound",
         ),
     ),
+    # 12 is the one a real deployment found and nothing local could: the MCP SDK permits only
+    # localhost unless told its public host, so every check that ever ran passed and the deployed
+    # server answered 421 to every client.
+    Breach(
+        number=12,
+        control="the MCP transport accepts the host this server is configured as",
+        file=APP,
+        before=(
+            '                allowed_hosts=[public, f"{public}:*", '
+            '"127.0.0.1:*", "localhost:*", "[::1]:*"],'
+        ),
+        after='                allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],',
+        tests=(
+            f"{BOUNDARIES}::test_the_mcp_transport_accepts_the_host_this_server_is_configured_as",
+        ),
+    ),
 )
 
 
