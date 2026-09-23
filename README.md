@@ -17,6 +17,13 @@ load-bearing by removing it and watching the tests go red.
 Every boundary below is re-verified **against that public deployment**, over the wire, with effect
 counts read out of PostgreSQL — [`artifacts/deployed-smoke.json`](artifacts/deployed-smoke.json).
 
+That artifact names the revision it was actually run against, which is one commit behind this one:
+the commits since changed documentation, this README, and the smoke script itself. **Nothing under
+`src/`, `tests/`, `migrations/`, `Dockerfile`, `deployment/` or `render.yaml` differs**, so the
+server those results describe is byte-identical to the server here —
+`git diff --name-only <that revision>..HEAD -- src/ tests/ migrations/ Dockerfile deployment/ render.yaml`
+is empty, which is the check to run rather than take on trust.
+
 ---
 
 ## The measured result
