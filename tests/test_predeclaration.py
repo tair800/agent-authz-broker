@@ -80,6 +80,26 @@ def test_the_predeclaration_skip_does_not_outlive_the_package() -> None:
     )
 
 
+def test_every_predeclared_scenario_has_a_function_in_the_kill_test() -> None:
+    """The effect-count guard below skips names it cannot find, so it must find them all.
+
+    Without this, a rename in the kill test would leave the loop inspecting zero functions and
+    still passing -- a guard that cannot fail. Every scenario ADR-001 fixed must name a function
+    the effect-count check can actually read.
+    """
+    tree = ast.parse(KILL_TEST.read_text(encoding="utf-8"))
+    defined = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    missing = [name for name in _SCENARIOS if name not in defined]
+    assert not missing, (
+        "these predeclared scenarios have no function in the kill test, so the effect-count "
+        "guard would silently inspect nothing for them: " + ", ".join(missing)
+    )
+
+
 def test_effect_counts_are_read_from_the_database_not_from_a_return_value() -> None:
     """ADR-001: 'a component that grades itself is not evidence.'
 
